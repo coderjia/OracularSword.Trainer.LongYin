@@ -1,0 +1,42 @@
+# OracularSword.Trainer.LongYin
+
+《龙隐立志传》的 MelonLoader 修改器。编译产物为 `OracularSword.Trainer.LongYin.dll`，命名空间为 `OracularSword.Trainer.LongYin`。游戏内显示名称为「修改器」。
+
+当前版本：**1.8.4**
+
+## 使用
+
+1. 为游戏安装 [MelonLoader](https://melonwiki.xyz/) 0.7 的 net6 版本。
+2. 将 `OracularSword.Trainer.LongYin.dll` 放入游戏目录的 `Mods`。
+3. 完全退出游戏后重新启动。
+4. 点击左上角「修改器」，或按 **F8** 开关窗口。
+
+窗口打开时会挡住下层的游戏点击。带「我方」的选项只作用于玩家一方。探索相关选项只在任务或奇遇的探索地图中生效。
+
+开关会写入 MelonLoader 配置，分类名仍为 `FastBuild`，以便沿用已有设置。
+
+## 选项
+
+- 建筑加速（1 天完成），含拆除、迁移和私宅
+- 科研加速（1 天完成）
+- 无限生命、无限内力、无限体力（我方）
+- 最高移动、一击必杀、无限行动（我方）
+- 增益无需充能、外功无冷却（我方）
+- 装备负重清零、物品负重清零、门派秘籍负重清零
+- 锁定日期（只锁定年月日，不锁时辰，大地图仍可移动）
+- 无限功法经验（补到下一层突破所需，不自动突破）
+- 最高好感度
+- 城镇状态充满（我方城、镇、乡、村的人口、防御、治安、民心）
+- 探索迷雾全开、探索单击瞬移、探索体力锁定
+
+关闭「城镇状态充满」或「探索体力锁定」后，当前数值会保留，游戏可以再正常增减。
+
+## 编译
+
+需要 .NET SDK，以及能编译 `net6.0` 的引用包。游戏本体、MelonLoader 和 IL2CPP 程序集通过项目里的 `GameDir` 引用，默认指向本机 Steam 安装目录。生成后会把 DLL 复制到该目录的 `Mods`。
+
+```powershell
+dotnet build OracularSword.Trainer.LongYin.csproj -c Release
+```
+
+若游戏正在运行，`Mods` 里的 DLL 可能被占用。先完全退出游戏再编译。
