@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.8.7", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.8.8", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -307,8 +307,8 @@ namespace OracularSword.Trainer.LongYin
 
             float width = Mathf.Min(font * 32f, Screen.width - 40f);
             float row = font * 2.2f;
-            float menu = _tab == 4 && _rareMenuOpen ? GradeNames().Length * row * 0.9f : 0f;
-            float height = Mathf.Min(font * 2.8f + row * 2.3f + TabBodyRows() * row + menu + font * 7.2f, Screen.height - 40f);
+            float menu = _tab == 0 && _rareMenuOpen ? GradeNames().Length * row * 0.9f : 0f;
+            float height = Mathf.Min(font * 2.8f + row * 2.3f + TabBodyRows() * row + menu + font * 8.2f, Screen.height - 40f);
             var window = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
             GUI.Box(window, "修改器", _windowStyle);
             DrawWindow(window, font, row);
@@ -345,11 +345,16 @@ namespace OracularSword.Trainer.LongYin
             _windowStyle.font = _uiFont;
             _windowStyle.fontSize = fontSize + 2;
             _windowStyle.alignment = TextAnchor.UpperCenter;
+            var panel = WindowTex();
+            var title = new Color(0.96f, 0.92f, 0.82f, 1f);
+            ApplyOpaque(_windowStyle, panel, title);
+            _windowStyle.border = new RectOffset(0, 0, 0, 0);
             _toggleStyle = new GUIStyle(GUI.skin.label);
             _toggleStyle.font = _uiFont;
             _toggleStyle.fontSize = fontSize;
             _toggleStyle.alignment = TextAnchor.MiddleLeft;
             _toggleStyle.padding = new RectOffset(0, 0, 0, 0);
+            _toggleStyle.normal.textColor = title;
             _buttonStyle = new GUIStyle(GUI.skin.button);
             _buttonStyle.font = _uiFont;
             _buttonStyle.fontSize = fontSize;
@@ -359,6 +364,7 @@ namespace OracularSword.Trainer.LongYin
             _labelStyle.font = _uiFont;
             _labelStyle.fontSize = fontSize;
             _labelStyle.wordWrap = true;
+            _labelStyle.normal.textColor = new Color(0.96f, 0.92f, 0.82f, 1f);
             _optionStyle = _toggleStyle;
             _hitStyle = new GUIStyle();
         }
@@ -369,11 +375,11 @@ namespace OracularSword.Trainer.LongYin
         {
             switch (_tab)
             {
-                case 0: return 3f;
+                case 0: return 7f;
                 case 1: return 8f;
                 case 2: return 3f;
                 case 3: return 4f;
-                case 4: return 4f;
+                case 4: return 1f;
                 default: return 1f;
             }
         }
@@ -390,6 +396,10 @@ namespace OracularSword.Trainer.LongYin
                     Option(ref y, x, width, row, DateLockEnabled, "锁定日期", SetDateLockEnabled);
                     Option(ref y, x, width, row, SkillExpEnabled, "无限功法经验", SetSkillExpEnabled);
                     Option(ref y, x, width, row, MaxFavorEnabled, "最高好感度", SetMaxFavorEnabled);
+                    Option(ref y, x, width, row, EquipWeightEnabled, "装备负重清零", SetEquipWeightEnabled);
+                    Option(ref y, x, width, row, ItemWeightEnabled, "物品负重清零", SetItemWeightEnabled);
+                    Option(ref y, x, width, row, AuctionWinEnabled, "拍卖物品归我", SetAuctionWinEnabled);
+                    DrawRareOption(ref y, x, width, row);
                     break;
                 case 1:
                     Option(ref y, x, width, row, InfiniteHp, "无限生命（我方）", SetInfiniteHp);
@@ -412,19 +422,13 @@ namespace OracularSword.Trainer.LongYin
                     Option(ref y, x, width, row, TownStateEnabled, "城镇状态充满（我方）", SetTownStateEnabled);
                     Option(ref y, x, width, row, BookWeightEnabled, "门派秘籍负重清零", SetBookWeightEnabled);
                     break;
-                case 4:
-                    Option(ref y, x, width, row, EquipWeightEnabled, "装备负重清零", SetEquipWeightEnabled);
-                    Option(ref y, x, width, row, ItemWeightEnabled, "物品负重清零", SetItemWeightEnabled);
-                    Option(ref y, x, width, row, AuctionWinEnabled, "拍卖物品归我", SetAuctionWinEnabled);
-                    DrawRareOption(ref y, x, width, row);
-                    break;
                 default:
                     GUI.Label(new Rect(x, y, width, row), "暂无选项", _labelStyle);
                     y += row;
                     break;
             }
-            GUI.Label(new Rect(x, y, width, font * 3.2f), TabHint(), _labelStyle);
-            y += font * 3.4f;
+            GUI.Label(new Rect(x, y, width, font * 4.2f), TabHint(), _labelStyle);
+            y += font * 4.4f;
             if (GUI.Button(new Rect(x, y, width, font * 2.2f), "关闭", _buttonStyle))
             {
                 _panelOpen = false;
@@ -459,11 +463,10 @@ namespace OracularSword.Trainer.LongYin
         {
             switch (_tab)
             {
-                case 0: return "锁定日期只锁定年月日，不锁时辰。F8 开关窗口。";
+                case 0: return "锁定日期只锁定年月日，不锁时辰。锁定品级只影响之后获得的物品。F8 开关窗口。";
                 case 1: return "带「我方」的选项只作用于我方。F8 开关窗口。";
                 case 2: return "探索选项只在任务或奇遇地图内生效。F8 开关窗口。";
                 case 3: return "城镇状态只作用于我方城、镇、乡、村。F8 开关窗口。";
-                case 4: return "锁定品级只影响之后获得的物品。F8 开关窗口。";
                 default: return "这一页留待以后的功能。F8 开关窗口。";
             }
         }
@@ -527,6 +530,35 @@ namespace OracularSword.Trainer.LongYin
             GUI.color = prev;
             GUI.Label(new Rect(boxRect.xMax + gap, row.y, row.width - box - gap, row.height), label, _optionStyle);
             return value;
+        }
+
+        static Texture2D _windowTex;
+
+        static Texture2D WindowTex()
+        {
+            if (_windowTex != null)
+                return _windowTex;
+            _windowTex = new Texture2D(1, 1);
+            _windowTex.SetPixel(0, 0, new Color(0.2f, 0.16f, 0.12f, 1f));
+            _windowTex.Apply();
+            return _windowTex;
+        }
+
+        static void ApplyOpaque(GUIStyle style, Texture2D background, Color text)
+        {
+            style.normal.background = background;
+            style.onNormal.background = background;
+            style.hover.background = background;
+            style.onHover.background = background;
+            style.focused.background = background;
+            style.onFocused.background = background;
+            style.active.background = background;
+            style.onActive.background = background;
+            style.normal.textColor = text;
+            style.onNormal.textColor = text;
+            style.hover.textColor = text;
+            style.focused.textColor = text;
+            style.active.textColor = text;
         }
 
         static Texture2D WhiteTex()
