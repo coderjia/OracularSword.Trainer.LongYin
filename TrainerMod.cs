@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.8.6", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.8.7", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -60,6 +60,7 @@ namespace OracularSword.Trainer.LongYin
         static bool _f8Held;
         static int _hotkeyFrame = -1;
         static bool _panelOpen;
+        static int _tab;
         static bool _rareMenuOpen;
         static bool _capturedIgnore;
         static bool _savedIgnore;
@@ -304,10 +305,10 @@ namespace OracularSword.Trainer.LongYin
                 return;
             }
 
-            float width = Mathf.Min(font * 28f, Screen.width - 40f);
+            float width = Mathf.Min(font * 32f, Screen.width - 40f);
             float row = font * 2.2f;
-            float menu = _rareMenuOpen ? GradeNames().Length * row * 0.9f : 0f;
-            float height = Mathf.Min(font * 2.8f + 22f * row + menu + font * 8f, Screen.height - 40f);
+            float menu = _tab == 4 && _rareMenuOpen ? GradeNames().Length * row * 0.9f : 0f;
+            float height = Mathf.Min(font * 2.8f + row * 2.3f + TabBodyRows() * row + menu + font * 7.2f, Screen.height - 40f);
             var window = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
             GUI.Box(window, "修改器", _windowStyle);
             DrawWindow(window, font, row);
@@ -362,39 +363,108 @@ namespace OracularSword.Trainer.LongYin
             _hitStyle = new GUIStyle();
         }
 
+        static readonly string[] TabNames = { "一般", "战斗", "探索", "门派/城镇", "物品", "其它" };
+
+        static float TabBodyRows()
+        {
+            switch (_tab)
+            {
+                case 0: return 3f;
+                case 1: return 8f;
+                case 2: return 3f;
+                case 3: return 4f;
+                case 4: return 4f;
+                default: return 1f;
+            }
+        }
+
         static void DrawWindow(Rect window, float font, float row)
         {
-            float x = window.x + font * 1.5f;
-            float width = window.width - font * 3f;
+            float x = window.x + font * 1.2f;
+            float width = window.width - font * 2.4f;
             float y = window.y + font * 2.8f;
-            Option(ref y, x, width, row, BuildEnabled, "建筑加速（1天完成）", SetBuildEnabled);
-            Option(ref y, x, width, row, ResearchEnabled, "科研加速（1天完成）", SetResearchEnabled);
-            Option(ref y, x, width, row, InfiniteHp, "无限生命（我方）", SetInfiniteHp);
-            Option(ref y, x, width, row, InfiniteMana, "无限内力（我方）", SetInfiniteMana);
-            Option(ref y, x, width, row, InfiniteStamina, "无限体力（我方）", SetInfiniteStamina);
-            Option(ref y, x, width, row, MaxMoveEnabled, "最高移动（我方）", SetMaxMoveEnabled);
-            Option(ref y, x, width, row, OneHitEnabled, "一击必杀（我方）", SetOneHitEnabled);
-            Option(ref y, x, width, row, InfiniteAction, "无限行动（我方）", SetInfiniteAction);
-            Option(ref y, x, width, row, BuffChargeEnabled, "增益无需充能（我方）", SetBuffChargeEnabled);
-            Option(ref y, x, width, row, NoSkillCdEnabled, "外功无冷却（我方）", SetNoSkillCdEnabled);
-            Option(ref y, x, width, row, EquipWeightEnabled, "装备负重清零", SetEquipWeightEnabled);
-            Option(ref y, x, width, row, ItemWeightEnabled, "物品负重清零", SetItemWeightEnabled);
-            Option(ref y, x, width, row, BookWeightEnabled, "门派秘籍负重清零", SetBookWeightEnabled);
-            Option(ref y, x, width, row, DateLockEnabled, "锁定日期", SetDateLockEnabled);
-            Option(ref y, x, width, row, SkillExpEnabled, "无限功法经验", SetSkillExpEnabled);
-            Option(ref y, x, width, row, MaxFavorEnabled, "最高好感度", SetMaxFavorEnabled);
-            Option(ref y, x, width, row, TownStateEnabled, "城镇状态充满（我方）", SetTownStateEnabled);
-            Option(ref y, x, width, row, ExploreFogEnabled, "探索迷雾全开", SetExploreFogEnabled);
-            Option(ref y, x, width, row, ExploreTeleportEnabled, "探索单击瞬移", SetExploreTeleportEnabled);
-            Option(ref y, x, width, row, ExplorePowerLockEnabled, "探索体力锁定", SetExplorePowerLockEnabled);
-            Option(ref y, x, width, row, AuctionWinEnabled, "拍卖物品归我", SetAuctionWinEnabled);
-            DrawRareOption(ref y, x, width, row);
-            GUI.Label(new Rect(x, y, width, font * 4.4f), "带「我方」的选项只作用于我方。探索选项只在任务/奇遇地图内生效。F8 开关窗口。", _labelStyle);
-            y += font * 4.6f;
+            DrawTabs(ref y, x, width, row);
+            switch (_tab)
+            {
+                case 0:
+                    Option(ref y, x, width, row, DateLockEnabled, "锁定日期", SetDateLockEnabled);
+                    Option(ref y, x, width, row, SkillExpEnabled, "无限功法经验", SetSkillExpEnabled);
+                    Option(ref y, x, width, row, MaxFavorEnabled, "最高好感度", SetMaxFavorEnabled);
+                    break;
+                case 1:
+                    Option(ref y, x, width, row, InfiniteHp, "无限生命（我方）", SetInfiniteHp);
+                    Option(ref y, x, width, row, InfiniteMana, "无限内力（我方）", SetInfiniteMana);
+                    Option(ref y, x, width, row, InfiniteStamina, "无限体力（我方）", SetInfiniteStamina);
+                    Option(ref y, x, width, row, MaxMoveEnabled, "最高移动（我方）", SetMaxMoveEnabled);
+                    Option(ref y, x, width, row, OneHitEnabled, "一击必杀（我方）", SetOneHitEnabled);
+                    Option(ref y, x, width, row, InfiniteAction, "无限行动（我方）", SetInfiniteAction);
+                    Option(ref y, x, width, row, BuffChargeEnabled, "增益无需充能（我方）", SetBuffChargeEnabled);
+                    Option(ref y, x, width, row, NoSkillCdEnabled, "外功无冷却（我方）", SetNoSkillCdEnabled);
+                    break;
+                case 2:
+                    Option(ref y, x, width, row, ExploreFogEnabled, "探索迷雾全开", SetExploreFogEnabled);
+                    Option(ref y, x, width, row, ExploreTeleportEnabled, "探索单击瞬移", SetExploreTeleportEnabled);
+                    Option(ref y, x, width, row, ExplorePowerLockEnabled, "探索体力锁定", SetExplorePowerLockEnabled);
+                    break;
+                case 3:
+                    Option(ref y, x, width, row, BuildEnabled, "建筑加速（1天完成）", SetBuildEnabled);
+                    Option(ref y, x, width, row, ResearchEnabled, "科研加速（1天完成）", SetResearchEnabled);
+                    Option(ref y, x, width, row, TownStateEnabled, "城镇状态充满（我方）", SetTownStateEnabled);
+                    Option(ref y, x, width, row, BookWeightEnabled, "门派秘籍负重清零", SetBookWeightEnabled);
+                    break;
+                case 4:
+                    Option(ref y, x, width, row, EquipWeightEnabled, "装备负重清零", SetEquipWeightEnabled);
+                    Option(ref y, x, width, row, ItemWeightEnabled, "物品负重清零", SetItemWeightEnabled);
+                    Option(ref y, x, width, row, AuctionWinEnabled, "拍卖物品归我", SetAuctionWinEnabled);
+                    DrawRareOption(ref y, x, width, row);
+                    break;
+                default:
+                    GUI.Label(new Rect(x, y, width, row), "暂无选项", _labelStyle);
+                    y += row;
+                    break;
+            }
+            GUI.Label(new Rect(x, y, width, font * 3.2f), TabHint(), _labelStyle);
+            y += font * 3.4f;
             if (GUI.Button(new Rect(x, y, width, font * 2.2f), "关闭", _buttonStyle))
             {
                 _panelOpen = false;
                 _rareMenuOpen = false;
+            }
+        }
+
+        static void DrawTabs(ref float y, float x, float width, float row)
+        {
+            int columns = 3;
+            float gap = row * 0.12f;
+            float tabW = (width - gap * (columns - 1)) / columns;
+            float tabH = row * 0.92f;
+            var prev = GUI.backgroundColor;
+            for (int i = 0; i < TabNames.Length; i++)
+            {
+                int col = i % columns;
+                int line = i / columns;
+                var rect = new Rect(x + col * (tabW + gap), y + line * (tabH + gap), tabW, tabH);
+                GUI.backgroundColor = _tab == i ? new Color(0.86f, 0.72f, 0.38f, 1f) : new Color(0.55f, 0.5f, 0.42f, 1f);
+                if (GUI.Button(rect, TabNames[i], _buttonStyle) && _tab != i)
+                {
+                    _tab = i;
+                    _rareMenuOpen = false;
+                }
+            }
+            GUI.backgroundColor = prev;
+            y += 2f * (tabH + gap) + gap;
+        }
+
+        static string TabHint()
+        {
+            switch (_tab)
+            {
+                case 0: return "锁定日期只锁定年月日，不锁时辰。F8 开关窗口。";
+                case 1: return "带「我方」的选项只作用于我方。F8 开关窗口。";
+                case 2: return "探索选项只在任务或奇遇地图内生效。F8 开关窗口。";
+                case 3: return "城镇状态只作用于我方城、镇、乡、村。F8 开关窗口。";
+                case 4: return "锁定品级只影响之后获得的物品。F8 开关窗口。";
+                default: return "这一页留待以后的功能。F8 开关窗口。";
             }
         }
 
