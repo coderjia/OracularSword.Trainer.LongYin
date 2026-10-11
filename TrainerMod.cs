@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.8.4", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.8.5", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -36,6 +36,8 @@ namespace OracularSword.Trainer.LongYin
         static MelonPreferences_Entry<bool> _exploreFogEnabled;
         static MelonPreferences_Entry<bool> _exploreTeleportEnabled;
         static MelonPreferences_Entry<bool> _explorePowerLockEnabled;
+        static MelonPreferences_Entry<bool> _itemRareLockEnabled;
+        static MelonPreferences_Entry<int> _itemRareIndex;
         static int _expGainDepth;
         static bool _fillingExp;
         static bool _loggedExpFailure;
@@ -57,6 +59,7 @@ namespace OracularSword.Trainer.LongYin
         static bool _f8Held;
         static int _hotkeyFrame = -1;
         static bool _panelOpen;
+        static bool _rareMenuOpen;
         static bool _capturedIgnore;
         static bool _savedIgnore;
         static bool _inputHeld;
@@ -98,6 +101,8 @@ namespace OracularSword.Trainer.LongYin
         public static bool ExploreFogEnabled { get; private set; }
         public static bool ExploreTeleportEnabled { get; private set; }
         public static bool ExplorePowerLockEnabled { get; private set; }
+        public static bool ItemRareLockEnabled { get; private set; }
+        public static int ItemRareIndex { get; private set; }
 
         public override void OnInitializeMelon()
         {
@@ -124,6 +129,8 @@ namespace OracularSword.Trainer.LongYin
             _exploreFogEnabled = category.CreateEntry("ExploreFogEnabled", false);
             _exploreTeleportEnabled = category.CreateEntry("ExploreTeleportEnabled", false);
             _explorePowerLockEnabled = category.CreateEntry("ExplorePowerLockEnabled", false);
+            _itemRareLockEnabled = category.CreateEntry("ItemRareLockEnabled", false);
+            _itemRareIndex = category.CreateEntry("ItemRareIndex", 5);
             BuildEnabled = _buildEnabled.Value;
             ResearchEnabled = _researchEnabled.Value;
             InfiniteHp = _infiniteHp.Value;
@@ -144,6 +151,8 @@ namespace OracularSword.Trainer.LongYin
             ExploreFogEnabled = _exploreFogEnabled.Value;
             ExploreTeleportEnabled = _exploreTeleportEnabled.Value;
             ExplorePowerLockEnabled = _explorePowerLockEnabled.Value;
+            ItemRareLockEnabled = _itemRareLockEnabled.Value;
+            ItemRareIndex = _itemRareIndex.Value;
 
             var harmony = new HarmonyLib.Harmony("oracularsword.trainer.longyin");
             PatchGetter(harmony, AccessTools.Method(typeof(AreaBuildingData), nameof(AreaBuildingData.GetUpgradeTime)));
@@ -211,6 +220,13 @@ namespace OracularSword.Trainer.LongYin
             Patch(harmony, AccessTools.Method(typeof(ExploreController), nameof(ExploreController.PlayerEnterGrid), new[] { typeof(GameObject), typeof(bool) }), null, nameof(KeepExplorePower));
             Patch(harmony, AccessTools.Method(typeof(ExploreController), nameof(ExploreController.PlayerEnterGrid), new[] { typeof(int), typeof(int), typeof(bool) }), null, nameof(KeepExplorePower));
             Patch(harmony, AccessTools.Method(typeof(ExploreController), nameof(ExploreController.ManageMoveStepLimit)), null, nameof(KeepExplorePower));
+            Patch(harmony, AccessTools.Method(typeof(GameController), nameof(GameController.RandomRareLvByBossLv)), null, nameof(ForceRolledRare));
+            Patch(harmony, AccessTools.Method(typeof(HeroData), nameof(HeroData.GetItem), new[] { typeof(ItemData), typeof(bool) }), nameof(BeforeGotItem), nameof(AfterGotItem), nameof(EndGrant));
+            Patch(harmony, AccessTools.Method(typeof(HeroData), nameof(HeroData.GetItem), new[] { typeof(ItemData), typeof(bool), typeof(bool), typeof(int), typeof(bool) }), nameof(BeforeGotItem), nameof(AfterGotItem), nameof(EndGrant));
+            Patch(harmony, AccessTools.Method(typeof(HeroData), nameof(HeroData.GetItem), new[] { typeof(ItemListData), typeof(bool), typeof(bool), typeof(int) }), nameof(BeforeGotBundle), nameof(AfterGotBundle), nameof(EndGrant));
+            Patch(harmony, AccessTools.Method(typeof(ItemListData), nameof(ItemListData.GetItem), new[] { typeof(ItemData), typeof(bool) }), nameof(BeforeBagItem), nameof(AfterBagItem), nameof(EndGrant));
+            Patch(harmony, AccessTools.Method(typeof(ItemListData), nameof(ItemListData.GetItem), new[] { typeof(ItemListData) }), nameof(BeforeBagBundle), nameof(AfterBagBundle), nameof(EndGrant));
+            Patch(harmony, AccessTools.Method(typeof(ItemData), nameof(ItemData.RecountRareLv)), null, nameof(KeepGrantedRare));
 
             LoggerInstance.Msg("已加载。左上角「修改器」或 F8 打开窗口。");
         }
@@ -277,7 +293,8 @@ namespace OracularSword.Trainer.LongYin
 
             float width = Mathf.Min(font * 28f, Screen.width - 40f);
             float row = font * 2.2f;
-            float height = Mathf.Min(font * 2.8f + 20f * row + font * 8f, Screen.height - 40f);
+            float menu = _rareMenuOpen ? GradeNames().Length * row * 0.9f : 0f;
+            float height = Mathf.Min(font * 2.8f + 21f * row + menu + font * 8f, Screen.height - 40f);
             var window = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
             GUI.Box(window, "修改器", _windowStyle);
             DrawWindow(window, font, row);
@@ -357,10 +374,40 @@ namespace OracularSword.Trainer.LongYin
             Option(ref y, x, width, row, ExploreFogEnabled, "探索迷雾全开", SetExploreFogEnabled);
             Option(ref y, x, width, row, ExploreTeleportEnabled, "探索单击瞬移", SetExploreTeleportEnabled);
             Option(ref y, x, width, row, ExplorePowerLockEnabled, "探索体力锁定", SetExplorePowerLockEnabled);
+            DrawRareOption(ref y, x, width, row);
             GUI.Label(new Rect(x, y, width, font * 4.4f), "带「我方」的选项只作用于我方。探索选项只在任务/奇遇地图内生效。F8 开关窗口。", _labelStyle);
             y += font * 4.6f;
             if (GUI.Button(new Rect(x, y, width, font * 2.2f), "关闭", _buttonStyle))
+            {
                 _panelOpen = false;
+                _rareMenuOpen = false;
+            }
+        }
+
+        static void DrawRareOption(ref float y, float x, float width, float row)
+        {
+            var names = GradeNames();
+            int index = ClampedRare(names.Length);
+            float gradeWidth = Mathf.Max(row * 3.6f, width * 0.28f);
+            float gap = row * 0.2f;
+            bool next = DrawOption(new Rect(x, y, width - gradeWidth - gap, row), ItemRareLockEnabled, "锁定物品品级");
+            if (next != ItemRareLockEnabled)
+                SetItemRareLockEnabled(next);
+            var gradeRect = new Rect(x + width - gradeWidth, y + row * 0.1f, gradeWidth, row * 0.8f);
+            if (GUI.Button(gradeRect, names[index] + (_rareMenuOpen ? " ▴" : " ▾"), _buttonStyle))
+                _rareMenuOpen = !_rareMenuOpen;
+            y += row;
+            if (!_rareMenuOpen)
+                return;
+            for (int i = 0; i < names.Length; i++)
+            {
+                if (GUI.Button(new Rect(gradeRect.x, y, gradeWidth, row * 0.8f), names[i], _buttonStyle))
+                {
+                    SetItemRareIndex(i);
+                    _rareMenuOpen = false;
+                }
+                y += row * 0.9f;
+            }
         }
 
         static void Option(ref float y, float x, float width, float row, bool current, string label, Action<bool> set)
@@ -417,6 +464,8 @@ namespace OracularSword.Trainer.LongYin
                 return;
             _hotkeyFrame = Time.frameCount;
             _panelOpen = !_panelOpen;
+            if (!_panelOpen)
+                _rareMenuOpen = false;
         }
 
         static void PollHotkey()
@@ -635,6 +684,9 @@ namespace OracularSword.Trainer.LongYin
             Pull(_exploreFogEnabled, () => ExploreFogEnabled, value => ExploreFogEnabled = value);
             Pull(_exploreTeleportEnabled, () => ExploreTeleportEnabled, value => ExploreTeleportEnabled = value);
             Pull(_explorePowerLockEnabled, () => ExplorePowerLockEnabled, value => ExplorePowerLockEnabled = value);
+            Pull(_itemRareLockEnabled, () => ItemRareLockEnabled, value => ItemRareLockEnabled = value);
+            if (_itemRareIndex != null && ItemRareIndex != _itemRareIndex.Value)
+                ItemRareIndex = _itemRareIndex.Value;
         }
 
         static void Pull(MelonPreferences_Entry<bool> entry, Func<bool> get, Action<bool> assign)
@@ -831,6 +883,220 @@ namespace OracularSword.Trainer.LongYin
             Log(value ? "探索体力锁定已打开" : "探索体力锁定已关闭，当前体力保留");
             if (value)
                 ApplyExplore();
+        }
+
+        public static void SetItemRareLockEnabled(bool value)
+        {
+            ItemRareLockEnabled = value;
+            SaveEntry(_itemRareLockEnabled, value);
+            var names = GradeNames();
+            string grade = names[ClampedRare(names.Length)];
+            Log(value ? "锁定物品品级已打开：" + grade : "锁定物品品级已关闭");
+        }
+
+        public static void SetItemRareIndex(int value)
+        {
+            var names = GradeNames();
+            if (names.Length > 0)
+                value = Mathf.Clamp(value, 0, names.Length - 1);
+            ItemRareIndex = value;
+            if (_itemRareIndex != null && _itemRareIndex.Value != value)
+            {
+                _itemRareIndex.Value = value;
+                MelonPreferences.Save();
+            }
+            Log("物品品级已选为" + names[ClampedRare(names.Length)]);
+        }
+
+        static readonly string[] FallbackGrades = { "品级1", "品级2", "品级3", "品级4", "品级5", "品级6" };
+        static string[] _gradeNames;
+        static int _gradeNamesFrame = -1;
+        static bool _loggedGrades;
+        static int _grantingRare;
+
+        static string[] GradeNames()
+        {
+            int frame = 0;
+            try
+            {
+                frame = Time.frameCount;
+            }
+            catch
+            {
+                frame = 0;
+            }
+            if (_gradeNames != null && _gradeNamesFrame == frame)
+                return _gradeNames;
+
+            string[] names = null;
+            try
+            {
+                var treasure = CopyRareNames(GlobalData.TreasureRareLvName);
+                var book = CopyRareNames(GlobalData.BookRareLvName);
+                if (HasGradeWord(treasure))
+                    names = treasure;
+                else if (HasGradeWord(book))
+                    names = book;
+                else if (treasure != null && treasure.Length > 0)
+                    names = treasure;
+                else
+                    names = book;
+            }
+            catch
+            {
+                names = null;
+            }
+            if (names == null || names.Length == 0)
+                names = FallbackGrades;
+            else if (!_loggedGrades)
+            {
+                _loggedGrades = true;
+                Log("物品品级：" + string.Join("、", names));
+            }
+            _gradeNames = names;
+            _gradeNamesFrame = frame;
+            return names;
+        }
+
+        static string[] CopyRareNames(Il2CppSystem.Collections.Generic.List<string> source)
+        {
+            if (source == null || source.Count <= 0)
+                return null;
+            var names = new string[source.Count];
+            for (int i = 0; i < source.Count; i++)
+            {
+                var name = source[i];
+                names[i] = string.IsNullOrEmpty(name) ? ("品级" + (i + 1)) : name;
+            }
+            return names;
+        }
+
+        static bool HasGradeWord(string[] names)
+        {
+            if (names == null)
+                return false;
+            for (int i = 0; i < names.Length; i++)
+            {
+                var name = names[i];
+                if (name != null && (name.Contains("残品") || name.Contains("下品") || name.Contains("极品") || name.Contains("残本")))
+                    return true;
+            }
+            return false;
+        }
+
+        static int ClampedRare(int count)
+        {
+            if (count <= 0)
+                return 0;
+            int index = ItemRareIndex;
+            if (index < 0 || index >= count)
+                return count - 1;
+            return index;
+        }
+
+        static void ApplyRare(ItemData item)
+        {
+            if (!ItemRareLockEnabled || item == null)
+                return;
+            int grade = ClampedRare(GradeNames().Length);
+            if (item.rareLv != grade)
+                item.rareLv = grade;
+        }
+
+        static void ApplyRareList(ItemListData list)
+        {
+            if (list == null)
+                return;
+            var items = list.allItem;
+            if (items == null)
+                return;
+            for (int i = 0; i < items.Count; i++)
+                ApplyRare(items[i]);
+        }
+
+        public static void ForceRolledRare(ref int __result)
+        {
+            if (!ItemRareLockEnabled)
+                return;
+            __result = ClampedRare(GradeNames().Length);
+        }
+
+        public static void BeforeGotItem(HeroData __instance, ItemData itemData, ref bool __state)
+        {
+            BeginGrant(__instance != null && IsTrainee(__instance), itemData, ref __state);
+        }
+
+        public static void AfterGotItem(ItemData itemData, bool __state)
+        {
+            if (__state)
+                ApplyRare(itemData);
+        }
+
+        public static void BeforeGotBundle(HeroData __instance, ItemListData _itemListData, ref bool __state)
+        {
+            __state = false;
+            if (!ItemRareLockEnabled || __instance == null || !IsTrainee(__instance))
+                return;
+            __state = true;
+            _grantingRare++;
+            ApplyRareList(_itemListData);
+        }
+
+        public static void AfterGotBundle(ItemListData _itemListData, bool __state)
+        {
+            if (__state)
+                ApplyRareList(_itemListData);
+        }
+
+        public static void BeforeBagItem(ItemListData __instance, ItemData targetItem, ref bool __state)
+        {
+            BeginGrant(IsPlayerBag(__instance), targetItem, ref __state);
+        }
+
+        public static void AfterBagItem(ItemData targetItem, bool __state)
+        {
+            if (__state)
+                ApplyRare(targetItem);
+        }
+
+        public static void BeforeBagBundle(ItemListData __instance, ItemListData target, ref bool __state)
+        {
+            __state = false;
+            if (!ItemRareLockEnabled || !IsPlayerBag(__instance))
+                return;
+            __state = true;
+            _grantingRare++;
+            ApplyRareList(target);
+        }
+
+        public static void AfterBagBundle(ItemListData target, bool __state)
+        {
+            if (__state)
+                ApplyRareList(target);
+        }
+
+        public static void KeepGrantedRare(ItemData __instance)
+        {
+            if (_grantingRare <= 0)
+                return;
+            ApplyRare(__instance);
+        }
+
+        public static Exception EndGrant(bool __state, Exception __exception)
+        {
+            if (__state && _grantingRare > 0)
+                _grantingRare--;
+            return __exception;
+        }
+
+        static void BeginGrant(bool receive, ItemData item, ref bool __state)
+        {
+            __state = false;
+            if (!ItemRareLockEnabled || !receive)
+                return;
+            __state = true;
+            _grantingRare++;
+            ApplyRare(item);
         }
 
         static void SaveEntry(MelonPreferences_Entry<bool> entry, bool value)
@@ -1060,7 +1326,7 @@ namespace OracularSword.Trainer.LongYin
             Patch(harmony, method, nameof(ForceOwnedDuration), null);
         }
 
-        static void Patch(HarmonyLib.Harmony harmony, MethodBase method, string prefix, string postfix)
+        static void Patch(HarmonyLib.Harmony harmony, MethodBase method, string prefix, string postfix, string finalizer = null)
         {
             if (method == null)
             {
@@ -1074,7 +1340,8 @@ namespace OracularSword.Trainer.LongYin
                 harmony.Patch(
                     method,
                     prefix: prefix == null ? null : new HarmonyMethod(typeof(TrainerMod), prefix),
-                    postfix: postfix == null ? null : new HarmonyMethod(typeof(TrainerMod), postfix));
+                    postfix: postfix == null ? null : new HarmonyMethod(typeof(TrainerMod), postfix),
+                    finalizer: finalizer == null ? null : new HarmonyMethod(typeof(TrainerMod), finalizer));
             }
             catch (Exception ex)
             {
