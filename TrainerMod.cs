@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.8.9", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.0", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -389,7 +389,7 @@ namespace OracularSword.Trainer.LongYin
                 case 1: return 8f;
                 case 2: return 3f;
                 case 3: return 4f;
-                case 4: return 10f;
+                case 4: return 11f;
                 default: return 1f;
             }
         }
@@ -482,7 +482,7 @@ namespace OracularSword.Trainer.LongYin
                 case 1: return "带「我方」的选项只作用于我方。F8 开关窗口。";
                 case 2: return "探索选项只在任务或奇遇地图内生效。F8 开关窗口。";
                 case 3: return "城镇状态只作用于我方城、镇、乡、村。F8 开关窗口。";
-                case 4: return "可多选。数量和品级只作用于这次添加。F8 开关窗口。";
+                case 4: return "可多选。数量和品级用于这次添加。等级只对珍宝和材料生效。F8 开关窗口。";
                 default: return "这一页留待以后的功能。F8 开关窗口。";
             }
         }
@@ -496,7 +496,9 @@ namespace OracularSword.Trainer.LongYin
             Med,
             Food,
             Horse,
-            Book
+            Book,
+            Treasure,
+            Material
         }
 
         sealed class ItemEntry
@@ -519,6 +521,7 @@ namespace OracularSword.Trainer.LongYin
         static int _catalogRareIndex = 5;
         static int _catalogGrade;
         static string _itemCountText = "1";
+        static string _itemLevelText = "1";
         static string _itemSearch = "";
         static Vector2 _itemScroll;
 
@@ -573,6 +576,7 @@ namespace OracularSword.Trainer.LongYin
             GUI.EndScrollView();
             y += viewH + row * 0.12f;
 
+            DrawLevelField(ref y, x, width, row);
             float countW = row * 2.2f;
             float gradeW = Mathf.Max(row * 3.4f, width * 0.22f);
             GUI.Label(new Rect(x, y, row * 1.8f, row), "数量", _labelStyle);
@@ -667,6 +671,7 @@ namespace OracularSword.Trainer.LongYin
             CollectItems(data.foodDataBase, CatalogKind.Food);
             CollectItems(data.horseDataBase, CatalogKind.Horse);
             CollectBooks(data.kungfuSkillDataBase);
+            CollectGeneratedTypes();
             _catalog.Sort((a, b) =>
             {
                 int kind = a.Kind.CompareTo(b.Kind);
@@ -741,6 +746,93 @@ namespace OracularSword.Trainer.LongYin
             }
         }
 
+        static void CollectGeneratedTypes()
+        {
+            try
+            {
+                CollectTypeNames(GlobalData.TreasureTypeName, CatalogKind.Treasure);
+                CollectTypeNames(GlobalData.MaterialTypeName, CatalogKind.Material);
+            }
+            catch
+            {
+            }
+        }
+
+        static void CollectTypeNames(Il2CppSystem.Collections.Generic.List<string> names, CatalogKind kind)
+        {
+            if (names == null)
+                return;
+            for (int i = 0; i < names.Count; i++)
+            {
+                var name = names[i];
+                if (string.IsNullOrEmpty(name))
+                    continue;
+                _catalog.Add(new ItemEntry
+                {
+                    Key = kind + ":" + i,
+                    Name = name,
+                    Title = name + "  " + KindName(kind),
+                    Stats = "属性效果在添加时按等级和品级生成",
+                    Describe = "",
+                    Kind = kind,
+                    Id = i,
+                    Source = null
+                });
+            }
+        }
+
+        static void DrawLevelField(ref float y, float x, float width, float row)
+        {
+            float labelW = row * 1.8f;
+            float fieldW = row * 2.2f;
+            GUI.Label(new Rect(x, y, labelW, row), "等级", _labelStyle);
+            var field = new Rect(x + labelW, y + row * 0.08f, fieldW, row * 0.84f);
+            bool enabled = PickedNeedsLevel();
+            if (enabled)
+            {
+                DrawField(field);
+                _itemLevelText = GUI.TextField(field, _itemLevelText ?? "1", _fieldStyle);
+            }
+            else
+            {
+                var prev = GUI.color;
+                GUI.color = new Color(0.38f, 0.34f, 0.3f, 1f);
+                GUI.DrawTexture(field, WhiteTex());
+                GUI.color = new Color(0.72f, 0.68f, 0.6f, 1f);
+                GUI.Label(field, string.IsNullOrEmpty(_itemLevelText) ? "1" : _itemLevelText, _labelStyle);
+                GUI.color = prev;
+            }
+            GUI.Label(new Rect(field.xMax + row * 0.2f, y, width - (field.xMax - x) - row * 0.2f, row),
+                enabled ? "用于本次选中的珍宝和材料" : "选中珍宝或材料后可填写", _labelStyle);
+            y += row;
+        }
+
+        static bool PickedNeedsLevel()
+        {
+            for (int i = 0; i < _catalog.Count; i++)
+            {
+                var entry = _catalog[i];
+                if (!_picked.Contains(entry.Key))
+                    continue;
+                if (entry.Kind == CatalogKind.Treasure || entry.Kind == CatalogKind.Material)
+                    return true;
+            }
+            return false;
+        }
+
+        static int ReadLevel(bool apply)
+        {
+            int level = 1;
+            int.TryParse(_itemLevelText, out level);
+            if (level < 1)
+                level = 1;
+            if (level > 99)
+                level = 99;
+            if (apply)
+                _itemLevelText = level.ToString();
+            return level;
+        }
+
         static string KindName(CatalogKind kind)
         {
             switch (kind)
@@ -752,7 +844,10 @@ namespace OracularSword.Trainer.LongYin
                 case CatalogKind.Med: return "药品";
                 case CatalogKind.Food: return "食物";
                 case CatalogKind.Horse: return "马匹";
-                default: return "秘籍";
+                case CatalogKind.Book: return "秘籍";
+                case CatalogKind.Treasure: return "珍宝";
+                case CatalogKind.Material: return "材料";
+                default: return "";
             }
         }
 
@@ -835,6 +930,8 @@ namespace OracularSword.Trainer.LongYin
             _itemCountText = count.ToString();
             int grade = CatalogGrade();
             _catalogGrade = grade;
+            bool useLevel = PickedNeedsLevel();
+            int level = ReadLevel(useLevel);
             int added = 0;
             _catalogAdding = true;
             try
@@ -846,7 +943,7 @@ namespace OracularSword.Trainer.LongYin
                         continue;
                     for (int n = 0; n < count; n++)
                     {
-                        var item = MakeCatalogItem(entry, grade, player);
+                        var item = MakeCatalogItem(entry, grade, level, player);
                         if (item == null)
                             continue;
                         item.rareLv = grade;
@@ -868,8 +965,10 @@ namespace OracularSword.Trainer.LongYin
                 Log("已把 " + added + " 件物品放入背包");
         }
 
-        static ItemData MakeCatalogItem(ItemEntry entry, int grade, HeroData player)
+        static ItemData MakeCatalogItem(ItemEntry entry, int grade, int level, HeroData player)
         {
+            if (entry.Kind == CatalogKind.Treasure || entry.Kind == CatalogKind.Material)
+                return MakeGeneratedItem(entry, grade, level);
             var game = GamePlay();
             try
             {
@@ -882,9 +981,9 @@ namespace OracularSword.Trainer.LongYin
                 if (game != null && entry.Source != null)
                 {
                     ItemData rolled = null;
-                    int level = entry.Source.itemLv;
+                    int itemLv = entry.Source.itemLv;
                     if (entry.Kind == CatalogKind.Weapon)
-                        rolled = game.GenerateWeapon(level, entry.Id, 0f, player);
+                        rolled = game.GenerateWeapon(itemLv, entry.Id, 0f, player);
                     else if (entry.Kind == CatalogKind.Med)
                         rolled = game.GenerateMedData(entry.Id, 0f);
                     else if (entry.Kind == CatalogKind.Food)
@@ -902,6 +1001,64 @@ namespace OracularSword.Trainer.LongYin
             if (copy != null)
                 copy.rareLv = grade;
             return copy;
+        }
+
+        static ItemData MakeGeneratedItem(ItemEntry entry, int grade, int level)
+        {
+            ItemData rolled = null;
+            var game = GamePlay();
+            try
+            {
+                if (game != null)
+                {
+                    rolled = entry.Kind == CatalogKind.Treasure
+                        ? game.GenerateTreasure(entry.Id, level, 0f)
+                        : game.GenerateMaterial(entry.Id, level, 0f);
+                }
+            }
+            catch
+            {
+                rolled = null;
+            }
+            if (rolled == null)
+            {
+                try
+                {
+                    var blank = new ItemData(entry.Kind == CatalogKind.Treasure ? ItemType.Treasure : ItemType.Material);
+                    rolled = entry.Kind == CatalogKind.Treasure
+                        ? blank.SetTreasureData(entry.Id, level, grade)
+                        : blank.SetMaterialData(entry.Id, level, grade);
+                    if (rolled == null)
+                        rolled = blank;
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+            if (string.IsNullOrEmpty(rolled.name))
+                rolled.name = entry.Name;
+            rolled.rareLv = grade;
+            RevealTreasure(rolled);
+            return rolled;
+        }
+
+        static void RevealTreasure(ItemData item)
+        {
+            if (item == null || item.treasureData == null)
+                return;
+            try
+            {
+                item.treasureData.fullIdentified = true;
+                var flags = item.treasureData.identified;
+                if (flags == null)
+                    return;
+                for (int i = 0; i < flags.Count; i++)
+                    flags[i] = true;
+            }
+            catch
+            {
+            }
         }
 
         static ItemData CloneItem(ItemData source)
