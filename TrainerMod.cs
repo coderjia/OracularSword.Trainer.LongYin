@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.0", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.1", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -315,7 +315,15 @@ namespace OracularSword.Trainer.LongYin
                 menu = GradeNames().Length * row * 0.9f;
             float height = Mathf.Min(font * 2.8f + row * 2.3f + TabBodyRows() * row + menu + font * 8.2f, Screen.height - 40f);
             var window = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
+            var prevColor = GUI.color;
+            var prevBg = GUI.backgroundColor;
+            GUI.color = Color.black;
+            GUI.backgroundColor = Color.white;
+            GUI.DrawTexture(window, WhiteTex());
+            GUI.color = Color.white;
             GUI.Box(window, "修改器", _windowStyle);
+            GUI.color = prevColor;
+            GUI.backgroundColor = prevBg;
             DrawWindow(window, font, row);
             var pointer = Event.current;
             if (pointer != null && (pointer.isMouse || pointer.type == EventType.ScrollWheel))
@@ -353,7 +361,7 @@ namespace OracularSword.Trainer.LongYin
             var panel = WindowTex();
             var title = new Color(0.96f, 0.92f, 0.82f, 1f);
             ApplyOpaque(_windowStyle, panel, title);
-            _windowStyle.border = new RectOffset(0, 0, 0, 0);
+            _windowStyle.border = new RectOffset(1, 1, 1, 1);
             _toggleStyle = new GUIStyle(GUI.skin.label);
             _toggleStyle.font = _uiFont;
             _toggleStyle.fontSize = fontSize;
@@ -1160,8 +1168,15 @@ namespace OracularSword.Trainer.LongYin
         {
             if (_windowTex != null)
                 return _windowTex;
-            _windowTex = new Texture2D(1, 1);
-            _windowTex.SetPixel(0, 0, new Color(0.2f, 0.16f, 0.12f, 1f));
+            _windowTex = new Texture2D(4, 4, TextureFormat.RGBA32, false);
+            var black = new Color(0f, 0f, 0f, 1f);
+            for (int py = 0; py < 4; py++)
+            {
+                for (int px = 0; px < 4; px++)
+                    _windowTex.SetPixel(px, py, black);
+            }
+            _windowTex.wrapMode = TextureWrapMode.Clamp;
+            _windowTex.filterMode = FilterMode.Point;
             _windowTex.Apply();
             return _windowTex;
         }
