@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.8.5", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.8.6", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -38,6 +38,7 @@ namespace OracularSword.Trainer.LongYin
         static MelonPreferences_Entry<bool> _explorePowerLockEnabled;
         static MelonPreferences_Entry<bool> _itemRareLockEnabled;
         static MelonPreferences_Entry<int> _itemRareIndex;
+        static MelonPreferences_Entry<bool> _auctionWinEnabled;
         static int _expGainDepth;
         static bool _fillingExp;
         static bool _loggedExpFailure;
@@ -103,6 +104,7 @@ namespace OracularSword.Trainer.LongYin
         public static bool ExplorePowerLockEnabled { get; private set; }
         public static bool ItemRareLockEnabled { get; private set; }
         public static int ItemRareIndex { get; private set; }
+        public static bool AuctionWinEnabled { get; private set; }
 
         public override void OnInitializeMelon()
         {
@@ -131,6 +133,7 @@ namespace OracularSword.Trainer.LongYin
             _explorePowerLockEnabled = category.CreateEntry("ExplorePowerLockEnabled", false);
             _itemRareLockEnabled = category.CreateEntry("ItemRareLockEnabled", false);
             _itemRareIndex = category.CreateEntry("ItemRareIndex", 5);
+            _auctionWinEnabled = category.CreateEntry("AuctionWinEnabled", false);
             BuildEnabled = _buildEnabled.Value;
             ResearchEnabled = _researchEnabled.Value;
             InfiniteHp = _infiniteHp.Value;
@@ -153,6 +156,7 @@ namespace OracularSword.Trainer.LongYin
             ExplorePowerLockEnabled = _explorePowerLockEnabled.Value;
             ItemRareLockEnabled = _itemRareLockEnabled.Value;
             ItemRareIndex = _itemRareIndex.Value;
+            AuctionWinEnabled = _auctionWinEnabled.Value;
 
             var harmony = new HarmonyLib.Harmony("oracularsword.trainer.longyin");
             PatchGetter(harmony, AccessTools.Method(typeof(AreaBuildingData), nameof(AreaBuildingData.GetUpgradeTime)));
@@ -227,6 +231,9 @@ namespace OracularSword.Trainer.LongYin
             Patch(harmony, AccessTools.Method(typeof(ItemListData), nameof(ItemListData.GetItem), new[] { typeof(ItemData), typeof(bool) }), nameof(BeforeBagItem), nameof(AfterBagItem), nameof(EndGrant));
             Patch(harmony, AccessTools.Method(typeof(ItemListData), nameof(ItemListData.GetItem), new[] { typeof(ItemListData) }), nameof(BeforeBagBundle), nameof(AfterBagBundle), nameof(EndGrant));
             Patch(harmony, AccessTools.Method(typeof(ItemData), nameof(ItemData.RecountRareLv)), null, nameof(KeepGrantedRare));
+            Patch(harmony, AccessTools.Method(typeof(AuctionController), nameof(AuctionController.StartAuctionDeal)), nameof(ClaimAuctionWinner), null);
+            Patch(harmony, AccessTools.Method(typeof(AuctionController), nameof(AuctionController.AutoFinishAuction)), nameof(ClaimAuctionWinner), nameof(GiveLeftoverLots));
+            PatchAuctionDeal(harmony);
 
             LoggerInstance.Msg("已加载。左上角「修改器」或 F8 打开窗口。");
         }
@@ -245,6 +252,12 @@ namespace OracularSword.Trainer.LongYin
                 ApplyBattle();
             if (ExploreFogEnabled || ExplorePowerLockEnabled)
                 ApplyExplore();
+            if (_auctionClaim)
+            {
+                var auction = AuctionNow();
+                if (auction == null || auction.auctionStep == AuctionStep.None)
+                    _auctionClaim = false;
+            }
 
             bool weightEnabled = EquipWeightEnabled || ItemWeightEnabled || BookWeightEnabled;
             if (!BuildEnabled && !ResearchEnabled && !weightEnabled && !TownStateEnabled)
@@ -294,7 +307,7 @@ namespace OracularSword.Trainer.LongYin
             float width = Mathf.Min(font * 28f, Screen.width - 40f);
             float row = font * 2.2f;
             float menu = _rareMenuOpen ? GradeNames().Length * row * 0.9f : 0f;
-            float height = Mathf.Min(font * 2.8f + 21f * row + menu + font * 8f, Screen.height - 40f);
+            float height = Mathf.Min(font * 2.8f + 22f * row + menu + font * 8f, Screen.height - 40f);
             var window = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
             GUI.Box(window, "修改器", _windowStyle);
             DrawWindow(window, font, row);
@@ -374,6 +387,7 @@ namespace OracularSword.Trainer.LongYin
             Option(ref y, x, width, row, ExploreFogEnabled, "探索迷雾全开", SetExploreFogEnabled);
             Option(ref y, x, width, row, ExploreTeleportEnabled, "探索单击瞬移", SetExploreTeleportEnabled);
             Option(ref y, x, width, row, ExplorePowerLockEnabled, "探索体力锁定", SetExplorePowerLockEnabled);
+            Option(ref y, x, width, row, AuctionWinEnabled, "拍卖物品归我", SetAuctionWinEnabled);
             DrawRareOption(ref y, x, width, row);
             GUI.Label(new Rect(x, y, width, font * 4.4f), "带「我方」的选项只作用于我方。探索选项只在任务/奇遇地图内生效。F8 开关窗口。", _labelStyle);
             y += font * 4.6f;
@@ -685,6 +699,7 @@ namespace OracularSword.Trainer.LongYin
             Pull(_exploreTeleportEnabled, () => ExploreTeleportEnabled, value => ExploreTeleportEnabled = value);
             Pull(_explorePowerLockEnabled, () => ExplorePowerLockEnabled, value => ExplorePowerLockEnabled = value);
             Pull(_itemRareLockEnabled, () => ItemRareLockEnabled, value => ItemRareLockEnabled = value);
+            Pull(_auctionWinEnabled, () => AuctionWinEnabled, value => AuctionWinEnabled = value);
             if (_itemRareIndex != null && ItemRareIndex != _itemRareIndex.Value)
                 ItemRareIndex = _itemRareIndex.Value;
         }
@@ -885,6 +900,13 @@ namespace OracularSword.Trainer.LongYin
                 ApplyExplore();
         }
 
+        public static void SetAuctionWinEnabled(bool value)
+        {
+            AuctionWinEnabled = value;
+            SaveEntry(_auctionWinEnabled, value);
+            Log(value ? "拍卖物品归我已打开" : "拍卖物品归我已关闭");
+        }
+
         public static void SetItemRareLockEnabled(bool value)
         {
             ItemRareLockEnabled = value;
@@ -1021,9 +1043,17 @@ namespace OracularSword.Trainer.LongYin
             __result = ClampedRare(GradeNames().Length);
         }
 
-        public static void BeforeGotItem(HeroData __instance, ItemData itemData, ref bool __state)
+        public static bool BeforeGotItem(HeroData __instance, ItemData itemData, ref bool __state)
         {
+            if (TryRedirectAuction(__instance, itemData))
+            {
+                __state = false;
+                return false;
+            }
+            if (IsTrainee(__instance))
+                NoteAuctionLot(itemData);
             BeginGrant(__instance != null && IsTrainee(__instance), itemData, ref __state);
+            return true;
         }
 
         public static void AfterGotItem(ItemData itemData, bool __state)
@@ -1032,14 +1062,16 @@ namespace OracularSword.Trainer.LongYin
                 ApplyRare(itemData);
         }
 
-        public static void BeforeGotBundle(HeroData __instance, ItemListData _itemListData, ref bool __state)
+        public static bool BeforeGotBundle(HeroData __instance, ItemListData _itemListData, ref bool __state)
         {
+            PullAuctionLots(__instance, _itemListData);
             __state = false;
             if (!ItemRareLockEnabled || __instance == null || !IsTrainee(__instance))
-                return;
+                return true;
             __state = true;
             _grantingRare++;
             ApplyRareList(_itemListData);
+            return true;
         }
 
         public static void AfterGotBundle(ItemListData _itemListData, bool __state)
@@ -1048,9 +1080,17 @@ namespace OracularSword.Trainer.LongYin
                 ApplyRareList(_itemListData);
         }
 
-        public static void BeforeBagItem(ItemListData __instance, ItemData targetItem, ref bool __state)
+        public static bool BeforeBagItem(ItemListData __instance, ItemData targetItem, ref bool __state)
         {
+            if (!IsPlayerBag(__instance) && TryRedirectAuction(null, targetItem))
+            {
+                __state = false;
+                return false;
+            }
+            if (IsPlayerBag(__instance))
+                NoteAuctionLot(targetItem);
             BeginGrant(IsPlayerBag(__instance), targetItem, ref __state);
+            return true;
         }
 
         public static void AfterBagItem(ItemData targetItem, bool __state)
@@ -1059,14 +1099,17 @@ namespace OracularSword.Trainer.LongYin
                 ApplyRare(targetItem);
         }
 
-        public static void BeforeBagBundle(ItemListData __instance, ItemListData target, ref bool __state)
+        public static bool BeforeBagBundle(ItemListData __instance, ItemListData target, ref bool __state)
         {
+            if (!IsPlayerBag(__instance))
+                PullAuctionLots(null, target);
             __state = false;
             if (!ItemRareLockEnabled || !IsPlayerBag(__instance))
-                return;
+                return true;
             __state = true;
             _grantingRare++;
             ApplyRareList(target);
+            return true;
         }
 
         public static void AfterBagBundle(ItemListData target, bool __state)
@@ -1087,6 +1130,267 @@ namespace OracularSword.Trainer.LongYin
             if (__state && _grantingRare > 0)
                 _grantingRare--;
             return __exception;
+        }
+
+        static ItemData _auctionDealLot;
+        static bool _auctionDealClaimed;
+        static bool _givingAuctionItem;
+
+        static bool _auctionClaim;
+
+        static void PatchAuctionDeal(HarmonyLib.Harmony harmony)
+        {
+            var nested = typeof(AuctionController).GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic);
+            for (int i = 0; i < nested.Length; i++)
+            {
+                if (nested[i].Name.IndexOf("StartAuctionDeal", StringComparison.Ordinal) < 0)
+                    continue;
+                Patch(harmony, AccessTools.Method(nested[i], "MoveNext"), nameof(BeforeAuctionDealStep), nameof(AfterAuctionDealStep));
+            }
+        }
+
+        public static void ClaimAuctionWinner(AuctionController __instance)
+        {
+            if (!AuctionWinEnabled || __instance == null)
+                return;
+            _auctionClaim = true;
+            if (!BuyingLot(__instance))
+                return;
+            var player = CurrentPlayer();
+            if (player == null)
+                return;
+            _auctionDealLot = CurrentLot(__instance);
+            _auctionDealClaimed = BagHas(player, _auctionDealLot);
+            __instance.nowOfferHero = player;
+            __instance.nextOfferHero = player;
+            float pay = __instance.playerOfferMoney;
+            if (pay < 0f)
+                pay = 0f;
+            __instance.nowOfferMoney = pay;
+        }
+
+        public static void BeforeAuctionDealStep(object __instance)
+        {
+            if (!AuctionWinEnabled || __instance == null || DealState(__instance) != 0)
+                return;
+            ClaimAuctionWinner(DealAuction(__instance));
+        }
+
+        public static void AfterAuctionDealStep(object __instance, ref bool __result)
+        {
+            if (!AuctionWinEnabled || __result)
+                return;
+            var auction = DealAuction(__instance);
+            if (auction == null || !BuyingLot(auction))
+            {
+                _auctionClaim = false;
+                return;
+            }
+            if (_auctionDealClaimed || BagHas(CurrentPlayer(), _auctionDealLot))
+            {
+                _auctionClaim = false;
+                return;
+            }
+            GiveLot(_auctionDealLot);
+            _auctionClaim = false;
+        }
+
+        public static void GiveLeftoverLots(AuctionController __instance)
+        {
+            if (!AuctionWinEnabled || __instance == null)
+            {
+                _auctionClaim = false;
+                return;
+            }
+            var list = __instance.auctionItemList;
+            if (list != null)
+            {
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var item = list[i];
+                    if (IsPlayerSale(__instance, item) || BagHas(CurrentPlayer(), item))
+                        continue;
+                    GiveLot(item);
+                }
+            }
+            _auctionClaim = false;
+        }
+
+        static AuctionController DealAuction(object step)
+        {
+            try
+            {
+                var prop = step.GetType().GetProperty("__4__this", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                return prop == null ? null : prop.GetValue(step) as AuctionController;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        static int DealState(object step)
+        {
+            try
+            {
+                var prop = step.GetType().GetProperty("__1__state", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                return prop == null ? -1 : Convert.ToInt32(prop.GetValue(step));
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        static AuctionController AuctionNow()
+        {
+            try
+            {
+                return AuctionController.Instance;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        static bool AuctionBusy(AuctionController auction)
+        {
+            if (auction == null)
+                return false;
+            var step = auction.auctionStep;
+            return step == AuctionStep.Offer || step == AuctionStep.Wait || step == AuctionStep.Deal || step == AuctionStep.End;
+        }
+
+        static ItemData CurrentLot(AuctionController auction)
+        {
+            var list = auction == null ? null : auction.auctionItemList;
+            if (list == null || list.Count == 0)
+                return null;
+            int index = auction.round;
+            if (index < 0 || index >= list.Count)
+                index = Mathf.Clamp(index, 0, list.Count - 1);
+            return list[index];
+        }
+
+        static bool BuyingLot(AuctionController auction)
+        {
+            var lot = CurrentLot(auction);
+            return lot != null && !IsPlayerSale(auction, lot);
+        }
+
+        static bool IsPlayerSale(AuctionController auction, ItemData item)
+        {
+            return item != null && auction != null && auction.playerSellItem == item;
+        }
+
+        static bool IsListedLot(AuctionController auction, ItemData item)
+        {
+            if (auction == null || item == null)
+                return false;
+            var list = auction.auctionItemList;
+            if (list == null)
+                return false;
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] == item)
+                    return true;
+            }
+            return false;
+        }
+
+        static bool BagHas(HeroData hero, ItemData item)
+        {
+            if (hero == null || item == null || hero.itemListData == null)
+                return false;
+            var items = hero.itemListData.allItem;
+            if (items == null)
+                return false;
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i] == item)
+                    return true;
+            }
+            return false;
+        }
+
+        static void NoteAuctionLot(ItemData item)
+        {
+            if (!AuctionWinEnabled || item == null)
+                return;
+            var auction = AuctionNow();
+            if (!AuctionBusy(auction) || !IsListedLot(auction, item))
+                return;
+            if (!_auctionClaim && auction.auctionStep != AuctionStep.Deal && auction.auctionStep != AuctionStep.End)
+                return;
+            _auctionDealClaimed = true;
+        }
+
+        static bool TryRedirectAuction(HeroData hero, ItemData item)
+        {
+            if (!AuctionWinEnabled || _givingAuctionItem || item == null)
+                return false;
+            if (hero != null && IsTrainee(hero))
+                return false;
+            var auction = AuctionNow();
+            if (!AuctionBusy(auction) || !IsListedLot(auction, item) || IsPlayerSale(auction, item))
+                return false;
+            if (!_auctionClaim && auction.auctionStep != AuctionStep.Deal && auction.auctionStep != AuctionStep.End)
+                return false;
+            GiveLot(item);
+            return true;
+        }
+
+        static void PullAuctionLots(HeroData hero, ItemListData incoming)
+        {
+            if (!AuctionWinEnabled || _givingAuctionItem || incoming == null)
+                return;
+            if (hero != null && IsTrainee(hero))
+                return;
+            var auction = AuctionNow();
+            if (!AuctionBusy(auction))
+                return;
+            if (!_auctionClaim && auction.auctionStep != AuctionStep.Deal && auction.auctionStep != AuctionStep.End)
+                return;
+            var items = incoming.allItem;
+            if (items == null)
+                return;
+            for (int i = items.Count - 1; i >= 0; i--)
+            {
+                var item = items[i];
+                if (!IsListedLot(auction, item) || IsPlayerSale(auction, item))
+                    continue;
+                items.RemoveAt(i);
+                GiveLot(item);
+            }
+        }
+
+        static void GiveLot(ItemData item)
+        {
+            if (item == null || _givingAuctionItem)
+                return;
+            var player = CurrentPlayer();
+            if (player == null)
+                return;
+            if (BagHas(player, item))
+            {
+                _auctionDealClaimed = true;
+                return;
+            }
+            _givingAuctionItem = true;
+            _auctionDealClaimed = true;
+            try
+            {
+                player.GetItem(item, true);
+            }
+            catch (Exception ex)
+            {
+                Log("拍卖物品交给主角失败。" + ex.Message);
+            }
+            finally
+            {
+                _givingAuctionItem = false;
+            }
         }
 
         static void BeginGrant(bool receive, ItemData item, ref bool __state)
