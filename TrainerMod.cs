@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.8.8", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.8.9", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -79,6 +79,7 @@ namespace OracularSword.Trainer.LongYin
         static GUIStyle _labelStyle;
         static GUIStyle _optionStyle;
         static GUIStyle _hitStyle;
+        static GUIStyle _fieldStyle;
         static Texture2D _whiteTex;
         static float _styleScale = -1f;
         const int MaxMoveRange = 99;
@@ -307,7 +308,11 @@ namespace OracularSword.Trainer.LongYin
 
             float width = Mathf.Min(font * 32f, Screen.width - 40f);
             float row = font * 2.2f;
-            float menu = _tab == 0 && _rareMenuOpen ? GradeNames().Length * row * 0.9f : 0f;
+            float menu = 0f;
+            if (_tab == 0 && _rareMenuOpen)
+                menu = GradeNames().Length * row * 0.9f;
+            else if (_tab == 4 && _catalogRareOpen)
+                menu = GradeNames().Length * row * 0.9f;
             float height = Mathf.Min(font * 2.8f + row * 2.3f + TabBodyRows() * row + menu + font * 8.2f, Screen.height - 40f);
             var window = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
             GUI.Box(window, "修改器", _windowStyle);
@@ -367,6 +372,11 @@ namespace OracularSword.Trainer.LongYin
             _labelStyle.normal.textColor = new Color(0.96f, 0.92f, 0.82f, 1f);
             _optionStyle = _toggleStyle;
             _hitStyle = new GUIStyle();
+            _fieldStyle = new GUIStyle(GUI.skin.textField);
+            _fieldStyle.font = _uiFont;
+            _fieldStyle.fontSize = fontSize;
+            _fieldStyle.alignment = TextAnchor.MiddleLeft;
+            _fieldStyle.normal.textColor = new Color(0.12f, 0.1f, 0.08f, 1f);
         }
 
         static readonly string[] TabNames = { "一般", "战斗", "探索", "门派/城镇", "物品", "其它" };
@@ -379,7 +389,7 @@ namespace OracularSword.Trainer.LongYin
                 case 1: return 8f;
                 case 2: return 3f;
                 case 3: return 4f;
-                case 4: return 1f;
+                case 4: return 10f;
                 default: return 1f;
             }
         }
@@ -422,6 +432,9 @@ namespace OracularSword.Trainer.LongYin
                     Option(ref y, x, width, row, TownStateEnabled, "城镇状态充满（我方）", SetTownStateEnabled);
                     Option(ref y, x, width, row, BookWeightEnabled, "门派秘籍负重清零", SetBookWeightEnabled);
                     break;
+                case 4:
+                    DrawItemCatalog(ref y, x, width, row, font);
+                    break;
                 default:
                     GUI.Label(new Rect(x, y, width, row), "暂无选项", _labelStyle);
                     y += row;
@@ -433,6 +446,7 @@ namespace OracularSword.Trainer.LongYin
             {
                 _panelOpen = false;
                 _rareMenuOpen = false;
+                _catalogRareOpen = false;
             }
         }
 
@@ -453,6 +467,7 @@ namespace OracularSword.Trainer.LongYin
                 {
                     _tab = i;
                     _rareMenuOpen = false;
+                    _catalogRareOpen = false;
                 }
             }
             GUI.backgroundColor = prev;
@@ -467,7 +482,457 @@ namespace OracularSword.Trainer.LongYin
                 case 1: return "带「我方」的选项只作用于我方。F8 开关窗口。";
                 case 2: return "探索选项只在任务或奇遇地图内生效。F8 开关窗口。";
                 case 3: return "城镇状态只作用于我方城、镇、乡、村。F8 开关窗口。";
+                case 4: return "可多选。数量和品级只作用于这次添加。F8 开关窗口。";
                 default: return "这一页留待以后的功能。F8 开关窗口。";
+            }
+        }
+
+        enum CatalogKind
+        {
+            Weapon,
+            Armor,
+            Helmet,
+            Shoes,
+            Med,
+            Food,
+            Horse,
+            Book
+        }
+
+        sealed class ItemEntry
+        {
+            public string Key;
+            public string Name;
+            public string Title;
+            public string Stats;
+            public string Describe;
+            public CatalogKind Kind;
+            public int Id;
+            public ItemData Source;
+        }
+
+        static readonly List<ItemEntry> _catalog = new List<ItemEntry>();
+        static readonly HashSet<string> _picked = new HashSet<string>();
+        static bool _catalogReady;
+        static bool _catalogAdding;
+        static bool _catalogRareOpen;
+        static int _catalogRareIndex = 5;
+        static int _catalogGrade;
+        static string _itemCountText = "1";
+        static string _itemSearch = "";
+        static Vector2 _itemScroll;
+
+        static void DrawItemCatalog(ref float y, float x, float width, float row, float font)
+        {
+            EnsureCatalog();
+            float searchW = width * 0.72f;
+            DrawField(new Rect(x, y, searchW, row * 0.86f));
+            _itemSearch = GUI.TextField(new Rect(x, y, searchW, row * 0.86f), _itemSearch ?? "", _fieldStyle);
+            if (GUI.Button(new Rect(x + searchW + row * 0.12f, y, width - searchW - row * 0.12f, row * 0.86f), "刷新", _buttonStyle))
+                RebuildCatalog();
+            y += row;
+
+            float viewH = row * 8f;
+            float card = font * 4.5f;
+            var view = new Rect(x, y, width, viewH);
+            int shown = 0;
+            for (int i = 0; i < _catalog.Count; i++)
+            {
+                if (MatchSearch(_catalog[i]))
+                    shown++;
+            }
+            float contentH = Mathf.Max(viewH, shown * card);
+            _itemScroll = GUI.BeginScrollView(view, _itemScroll, new Rect(0f, 0f, width - 18f, contentH));
+            float cy = 0f;
+            var tex = WhiteTex();
+            var prev = GUI.color;
+            for (int i = 0; i < _catalog.Count; i++)
+            {
+                var entry = _catalog[i];
+                if (!MatchSearch(entry))
+                    continue;
+                var rect = new Rect(0f, cy, width - 18f, card - 3f);
+                if (_picked.Contains(entry.Key))
+                {
+                    GUI.color = new Color(0.55f, 0.42f, 0.18f, 1f);
+                    GUI.DrawTexture(rect, tex);
+                    GUI.color = prev;
+                }
+                if (GUI.Button(rect, GUIContent.none, _hitStyle))
+                {
+                    if (!_picked.Add(entry.Key))
+                        _picked.Remove(entry.Key);
+                }
+                GUI.Label(new Rect(6f, cy + 2f, rect.width - 10f, font * 1.35f), entry.Title, _labelStyle);
+                GUI.Label(new Rect(6f, cy + font * 1.35f, rect.width - 10f, font * 1.35f), entry.Stats, _labelStyle);
+                GUI.Label(new Rect(6f, cy + font * 2.7f, rect.width - 10f, font * 1.6f), entry.Describe, _labelStyle);
+                cy += card;
+            }
+            if (shown == 0)
+                GUI.Label(new Rect(6f, 4f, width - 24f, row), _catalog.Count == 0 ? "进入存档后点刷新加载物品。" : "没有匹配的物品。", _labelStyle);
+            GUI.EndScrollView();
+            y += viewH + row * 0.12f;
+
+            float countW = row * 2.2f;
+            float gradeW = Mathf.Max(row * 3.4f, width * 0.22f);
+            GUI.Label(new Rect(x, y, row * 1.8f, row), "数量", _labelStyle);
+            var countRect = new Rect(x + row * 1.8f, y + row * 0.08f, countW, row * 0.84f);
+            DrawField(countRect);
+            _itemCountText = GUI.TextField(countRect, _itemCountText ?? "1", _fieldStyle);
+            var names = GradeNames();
+            int grade = CatalogGradeIndex(names.Length);
+            var gradeRect = new Rect(countRect.xMax + row * 0.16f, countRect.y, gradeW, countRect.height);
+            if (GUI.Button(gradeRect, names[grade] + (_catalogRareOpen ? " ▴" : " ▾"), _buttonStyle))
+                _catalogRareOpen = !_catalogRareOpen;
+            float addX = gradeRect.xMax + row * 0.16f;
+            string addLabel = _picked.Count > 0 ? "添加（" + _picked.Count + "）" : "添加";
+            if (GUI.Button(new Rect(addX, countRect.y, x + width - addX, countRect.height), addLabel, _buttonStyle))
+                AddCatalogItems();
+            y += row;
+            if (!_catalogRareOpen)
+                return;
+            for (int i = 0; i < names.Length; i++)
+            {
+                if (GUI.Button(new Rect(gradeRect.x, y, gradeW, row * 0.84f), names[i], _buttonStyle))
+                {
+                    _catalogRareIndex = i;
+                    _catalogRareOpen = false;
+                }
+                y += row * 0.9f;
+            }
+        }
+
+        static void DrawField(Rect rect)
+        {
+            var prev = GUI.color;
+            GUI.color = new Color(0.94f, 0.9f, 0.82f, 1f);
+            GUI.DrawTexture(rect, WhiteTex());
+            GUI.color = prev;
+        }
+
+        static bool MatchSearch(ItemEntry entry)
+        {
+            if (entry == null)
+                return false;
+            var word = _itemSearch;
+            if (string.IsNullOrEmpty(word))
+                return true;
+            return entry.Name != null && entry.Name.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        static int CatalogGradeIndex(int count)
+        {
+            if (count <= 0)
+                return 0;
+            if (_catalogRareIndex < 0 || _catalogRareIndex >= count)
+                return count - 1;
+            return _catalogRareIndex;
+        }
+
+        static int CatalogGrade()
+        {
+            return CatalogGradeIndex(GradeNames().Length);
+        }
+
+        static void EnsureCatalog()
+        {
+            if (_catalogReady)
+                return;
+            RebuildCatalog();
+        }
+
+        static void RebuildCatalog()
+        {
+            _catalog.Clear();
+            _catalogReady = true;
+            GameDataController data = null;
+            try
+            {
+                data = GameDataController.Instance;
+            }
+            catch
+            {
+                data = null;
+            }
+            if (data == null)
+            {
+                _catalogReady = false;
+                return;
+            }
+            CollectItems(data.weaponDataBase, CatalogKind.Weapon);
+            CollectItems(data.armorDataBase, CatalogKind.Armor);
+            CollectItems(data.helmetDataBase, CatalogKind.Helmet);
+            CollectItems(data.shoesDataBase, CatalogKind.Shoes);
+            CollectItems(data.medDataBase, CatalogKind.Med);
+            CollectItems(data.foodDataBase, CatalogKind.Food);
+            CollectItems(data.horseDataBase, CatalogKind.Horse);
+            CollectBooks(data.kungfuSkillDataBase);
+            _catalog.Sort((a, b) =>
+            {
+                int kind = a.Kind.CompareTo(b.Kind);
+                if (kind != 0)
+                    return kind;
+                int level = ItemLevel(a).CompareTo(ItemLevel(b));
+                if (level != 0)
+                    return level;
+                return string.Compare(a.Name, b.Name, StringComparison.Ordinal);
+            });
+        }
+
+        static int ItemLevel(ItemEntry entry)
+        {
+            if (entry.Source != null)
+                return entry.Source.itemLv;
+            return 0;
+        }
+
+        static void CollectItems(Il2CppSystem.Collections.Generic.Dictionary<int, ItemData> dict, CatalogKind kind)
+        {
+            if (dict == null)
+                return;
+            foreach (var pair in dict)
+            {
+                var item = pair.Value;
+                if (item == null || string.IsNullOrEmpty(item.name))
+                    continue;
+                _catalog.Add(new ItemEntry
+                {
+                    Key = kind + ":" + pair.Key,
+                    Name = item.name,
+                    Title = item.name + "  " + KindName(kind) + "  等级 " + item.itemLv,
+                    Stats = ItemStats(item),
+                    Describe = item.describe ?? "",
+                    Kind = kind,
+                    Id = pair.Key,
+                    Source = item
+                });
+            }
+        }
+
+        static void CollectBooks(Il2CppSystem.Collections.Generic.Dictionary<int, KungfuSkillData> dict)
+        {
+            if (dict == null)
+                return;
+            foreach (var pair in dict)
+            {
+                var skill = pair.Value;
+                if (skill == null || string.IsNullOrEmpty(skill.name))
+                    continue;
+                string stats = "";
+                try
+                {
+                    stats = skill.TypeDescribe();
+                }
+                catch
+                {
+                    stats = "";
+                }
+                _catalog.Add(new ItemEntry
+                {
+                    Key = "book:" + pair.Key,
+                    Name = skill.name,
+                    Title = skill.name + "  秘籍  等级 " + skill.rareLv,
+                    Stats = stats ?? "",
+                    Describe = skill.describe ?? "",
+                    Kind = CatalogKind.Book,
+                    Id = pair.Key,
+                    Source = null
+                });
+            }
+        }
+
+        static string KindName(CatalogKind kind)
+        {
+            switch (kind)
+            {
+                case CatalogKind.Weapon: return "武器";
+                case CatalogKind.Armor: return "护甲";
+                case CatalogKind.Helmet: return "头盔";
+                case CatalogKind.Shoes: return "鞋子";
+                case CatalogKind.Med: return "药品";
+                case CatalogKind.Food: return "食物";
+                case CatalogKind.Horse: return "马匹";
+                default: return "秘籍";
+            }
+        }
+
+        static string ItemStats(ItemData item)
+        {
+            if (item == null)
+                return "";
+            try
+            {
+                if (item.equipmentData != null)
+                    return JoinStats(item.equipmentData.GetExtraAddName(), DescribeAdd(item.equipmentData.GetBaseAddData()), DescribeAdd(item.equipmentData.extraAddData));
+                if (item.medFoodData != null)
+                {
+                    string state = "";
+                    var change = item.medFoodData.GetChangeHeroStateData();
+                    if (change != null)
+                        state = change.GetDescribe();
+                    return JoinStats(state, DescribeAdd(item.medFoodData.extraAddData));
+                }
+                if (item.horseData != null)
+                    return item.horseData.GetDescribe() ?? "";
+                if (item.materialData != null)
+                    return DescribeAdd(item.materialData.extraAddData);
+            }
+            catch
+            {
+            }
+            return "";
+        }
+
+        static string DescribeAdd(HeroSpeAddData data)
+        {
+            if (data == null)
+                return "";
+            try
+            {
+                if (data.isEmpty())
+                    return "";
+                return data.GetDescribe(false, false, 0, true) ?? "";
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        static string JoinStats(params string[] parts)
+        {
+            var text = "";
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (string.IsNullOrEmpty(parts[i]))
+                    continue;
+                if (text.Length > 0)
+                    text += " ";
+                text += parts[i];
+            }
+            return text;
+        }
+
+        static void AddCatalogItems()
+        {
+            if (_picked.Count == 0)
+            {
+                Log("先在列表里选中物品");
+                return;
+            }
+            var player = CurrentPlayer();
+            if (player == null)
+            {
+                Log("还没有进入存档，无法添加物品");
+                return;
+            }
+            int count = 1;
+            int.TryParse(_itemCountText, out count);
+            if (count < 1)
+                count = 1;
+            if (count > 99)
+                count = 99;
+            _itemCountText = count.ToString();
+            int grade = CatalogGrade();
+            _catalogGrade = grade;
+            int added = 0;
+            _catalogAdding = true;
+            try
+            {
+                for (int i = 0; i < _catalog.Count; i++)
+                {
+                    var entry = _catalog[i];
+                    if (!_picked.Contains(entry.Key))
+                        continue;
+                    for (int n = 0; n < count; n++)
+                    {
+                        var item = MakeCatalogItem(entry, grade, player);
+                        if (item == null)
+                            continue;
+                        item.rareLv = grade;
+                        player.GetItem(item, false);
+                        item.rareLv = grade;
+                        added++;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("添加物品失败。" + ex.Message);
+            }
+            finally
+            {
+                _catalogAdding = false;
+            }
+            if (added > 0)
+                Log("已把 " + added + " 件物品放入背包");
+        }
+
+        static ItemData MakeCatalogItem(ItemEntry entry, int grade, HeroData player)
+        {
+            var game = GamePlay();
+            try
+            {
+                if (entry.Kind == CatalogKind.Book)
+                {
+                    var book = new ItemData(ItemType.Book);
+                    var made = book.SetBookData(entry.Id, grade);
+                    return made ?? book;
+                }
+                if (game != null && entry.Source != null)
+                {
+                    ItemData rolled = null;
+                    int level = entry.Source.itemLv;
+                    if (entry.Kind == CatalogKind.Weapon)
+                        rolled = game.GenerateWeapon(level, entry.Id, 0f, player);
+                    else if (entry.Kind == CatalogKind.Med)
+                        rolled = game.GenerateMedData(entry.Id, 0f);
+                    else if (entry.Kind == CatalogKind.Food)
+                        rolled = game.GenerateFoodData(entry.Id, 0f);
+                    else if (entry.Kind == CatalogKind.Horse)
+                        rolled = game.GenerateHorseData(entry.Id, 0f);
+                    if (rolled != null)
+                        return rolled;
+                }
+            }
+            catch
+            {
+            }
+            var copy = CloneItem(entry.Source);
+            if (copy != null)
+                copy.rareLv = grade;
+            return copy;
+        }
+
+        static ItemData CloneItem(ItemData source)
+        {
+            if (source == null)
+                return null;
+            try
+            {
+                var cloned = source.Clone();
+                var copy = cloned as ItemData;
+                if (copy == null && cloned != null)
+                    copy = cloned.TryCast<ItemData>();
+                if (copy == null || copy == source)
+                    return null;
+                return copy;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        static GameController GamePlay()
+        {
+            try
+            {
+                return GameController.Instance;
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -1140,6 +1605,11 @@ namespace OracularSword.Trainer.LongYin
 
         public static void ForceRolledRare(ref int __result)
         {
+            if (_catalogAdding)
+            {
+                __result = CatalogGrade();
+                return;
+            }
             if (!ItemRareLockEnabled)
                 return;
             __result = ClampedRare(GradeNames().Length);
@@ -1498,7 +1968,7 @@ namespace OracularSword.Trainer.LongYin
         static void BeginGrant(bool receive, ItemData item, ref bool __state)
         {
             __state = false;
-            if (!ItemRareLockEnabled || !receive)
+            if (_catalogAdding || !ItemRareLockEnabled || !receive)
                 return;
             __state = true;
             _grantingRare++;
