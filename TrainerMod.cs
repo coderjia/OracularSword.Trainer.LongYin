@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.2", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.4", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -306,7 +306,7 @@ namespace OracularSword.Trainer.LongYin
                 return;
             }
 
-            float width = Mathf.Min(font * 32f, Screen.width - 40f);
+            float width = Mathf.Min(font * 41.6f, Screen.width - 40f);
             float row = font * 2.2f;
             float menu = 0f;
             if (_tab == 0 && _rareMenuOpen)
@@ -397,7 +397,7 @@ namespace OracularSword.Trainer.LongYin
                 case 1: return 8f;
                 case 2: return 3f;
                 case 3: return 4f;
-                case 4: return 11f;
+                case 4: return 12f;
                 default: return 1f;
             }
         }
@@ -490,7 +490,7 @@ namespace OracularSword.Trainer.LongYin
                 case 1: return "带「我方」的选项只作用于我方。F8 开关窗口。";
                 case 2: return "探索选项只在任务或奇遇地图内生效。F8 开关窗口。";
                 case 3: return "城镇状态只作用于我方城、镇、乡、村。F8 开关窗口。";
-                case 4: return "可多选。数量和品级用于这次添加。等级用于武器、护甲、头盔、鞋子、珍宝和材料；列表里的等级是物品表原等级。F8 开关窗口。";
+                case 4: return "可多选。数量和品级用于这次添加。等级为劣质到绝世六档，用于武器、护甲、头盔、鞋子、珍宝和材料。F8 开关窗口。";
                 default: return "这一页留待以后的功能。F8 开关窗口。";
             }
         }
@@ -528,8 +528,9 @@ namespace OracularSword.Trainer.LongYin
         static bool _catalogRareOpen;
         static int _catalogRareIndex = 5;
         static int _catalogGrade;
+        static readonly string[] LevelNames = { "劣质(0级)", "普通(1级)", "优质(2级)", "精良(3级)", "完美(4级)", "绝世(5级)" };
+        static int _itemLevel = 1;
         static string _itemCountText = "1";
-        static string _itemLevelText = "1";
         static string _itemSearch = "";
         static Vector2 _itemScroll;
 
@@ -544,7 +545,7 @@ namespace OracularSword.Trainer.LongYin
             y += row;
 
             float viewH = row * 8f;
-            float card = font * 4.5f;
+            float card = font * 6.8f;
             var view = new Rect(x, y, width, viewH);
             int shown = 0;
             for (int i = 0; i < _catalog.Count; i++)
@@ -562,21 +563,27 @@ namespace OracularSword.Trainer.LongYin
                 var entry = _catalog[i];
                 if (!MatchSearch(entry))
                     continue;
-                var rect = new Rect(0f, cy, width - 18f, card - 3f);
+                var rect = new Rect(0f, cy, width - 18f, card - 4f);
+                GUI.BeginGroup(rect);
+                var local = new Rect(0f, 0f, rect.width, rect.height);
                 if (_picked.Contains(entry.Key))
                 {
                     GUI.color = new Color(0.55f, 0.42f, 0.18f, 1f);
-                    GUI.DrawTexture(rect, tex);
+                    GUI.DrawTexture(local, tex);
                     GUI.color = prev;
                 }
-                if (GUI.Button(rect, GUIContent.none, _hitStyle))
+                if (GUI.Button(local, GUIContent.none, _hitStyle))
                 {
                     if (!_picked.Add(entry.Key))
                         _picked.Remove(entry.Key);
                 }
-                GUI.Label(new Rect(6f, cy + 2f, rect.width - 10f, font * 1.35f), entry.Title, _labelStyle);
-                GUI.Label(new Rect(6f, cy + font * 1.35f, rect.width - 10f, font * 1.35f), entry.Stats, _labelStyle);
-                GUI.Label(new Rect(6f, cy + font * 2.7f, rect.width - 10f, font * 1.6f), entry.Describe, _labelStyle);
+                float titleH = font * 2.15f;
+                float statsH = font * 2.15f;
+                float textW = rect.width - 12f;
+                GUI.Label(new Rect(6f, 2f, textW, titleH), entry.Title, _labelStyle);
+                GUI.Label(new Rect(6f, 2f + titleH, textW, statsH), entry.Stats, _labelStyle);
+                GUI.Label(new Rect(6f, 4f + titleH + statsH, textW, rect.height - titleH - statsH - 6f), entry.Describe, _labelStyle);
+                GUI.EndGroup();
                 cy += card;
             }
             if (shown == 0)
@@ -712,7 +719,7 @@ namespace OracularSword.Trainer.LongYin
                 {
                     Key = kind + ":" + pair.Key,
                     Name = item.name,
-                    Title = item.name + "  " + KindName(kind) + "  " + (UsesChosenLevel(kind) ? "物品表等级 " : "等级 ") + item.itemLv,
+                    Title = item.name + "  " + KindName(kind) + "  " + (UsesChosenLevel(kind) ? "物品表等级 " : "等级 ") + LevelName(item.itemLv),
                     Stats = ItemStats(item),
                     Describe = item.describe ?? "",
                     Kind = kind,
@@ -791,28 +798,57 @@ namespace OracularSword.Trainer.LongYin
 
         static void DrawLevelField(ref float y, float x, float width, float row)
         {
-            float labelW = row * 1.8f;
-            float fieldW = row * 2.2f;
-            GUI.Label(new Rect(x, y, labelW, row), "等级", _labelStyle);
-            var field = new Rect(x + labelW, y + row * 0.08f, fieldW, row * 0.84f);
             bool enabled = PickedNeedsLevel();
-            if (enabled)
+            var prevEnabled = GUI.enabled;
+            var prevColor = GUI.color;
+            if (!enabled)
             {
-                DrawField(field);
-                _itemLevelText = GUI.TextField(field, _itemLevelText ?? "1", _fieldStyle);
+                GUI.enabled = false;
+                GUI.color = new Color(0.62f, 0.58f, 0.52f, 1f);
             }
-            else
+            float colW = width / 3f;
+            for (int i = 0; i < LevelNames.Length; i++)
             {
-                var prev = GUI.color;
-                GUI.color = new Color(0.38f, 0.34f, 0.3f, 1f);
-                GUI.DrawTexture(field, WhiteTex());
-                GUI.color = new Color(0.72f, 0.68f, 0.6f, 1f);
-                GUI.Label(field, string.IsNullOrEmpty(_itemLevelText) ? "1" : _itemLevelText, _labelStyle);
-                GUI.color = prev;
+                int col = i % 3;
+                int line = i / 3;
+                var rect = new Rect(x + col * colW, y + line * row, colW, row);
+                if (enabled && GUI.Button(rect, GUIContent.none, _hitStyle))
+                    _itemLevel = i;
+                DrawRadio(rect, _itemLevel == i, LevelNames[i]);
             }
-            GUI.Label(new Rect(field.xMax + row * 0.2f, y, width - (field.xMax - x) - row * 0.2f, row),
-                enabled ? "用于武器、护甲、头盔、鞋子、珍宝和材料" : "选中这些物品后可填写", _labelStyle);
-            y += row;
+            GUI.enabled = prevEnabled;
+            GUI.color = prevColor;
+            y += row * 2f;
+        }
+
+        static void DrawRadio(Rect row, bool selected, string label)
+        {
+            float box = _labelStyle.fontSize;
+            float gap = box * 0.45f;
+            float boxY = row.y + (row.height - box) * 0.5f;
+            var boxRect = new Rect(row.x, boxY, box, box);
+            var tex = WhiteTex();
+            var prev = GUI.color;
+            GUI.color = new Color(0.82f, 0.78f, 0.62f, prev.a);
+            GUI.DrawTexture(boxRect, tex);
+            float border = Mathf.Max(1f, box * 0.16f);
+            GUI.color = new Color(0.16f, 0.14f, 0.11f, prev.a);
+            GUI.DrawTexture(new Rect(boxRect.x + border, boxRect.y + border, box - border * 2f, box - border * 2f), tex);
+            if (selected)
+            {
+                GUI.color = new Color(0.93f, 0.78f, 0.28f, prev.a);
+                float inner = Mathf.Max(2f, box * 0.28f);
+                GUI.DrawTexture(new Rect(boxRect.x + inner, boxRect.y + inner, box - inner * 2f, box - inner * 2f), tex);
+            }
+            GUI.color = prev;
+            GUI.Label(new Rect(boxRect.xMax + gap, row.y, row.width - box - gap, row.height), label, _labelStyle);
+        }
+
+        static string LevelName(int level)
+        {
+            if (level >= 0 && level < LevelNames.Length)
+                return LevelNames[level];
+            return level.ToString();
         }
 
         static bool PickedNeedsLevel()
@@ -846,15 +882,9 @@ namespace OracularSword.Trainer.LongYin
 
         static int ReadLevel(bool apply)
         {
-            int level = 1;
-            int.TryParse(_itemLevelText, out level);
-            if (level < 1)
-                level = 1;
-            if (level > 99)
-                level = 99;
-            if (apply)
-                _itemLevelText = level.ToString();
-            return level;
+            if (_itemLevel < 0 || _itemLevel >= LevelNames.Length)
+                _itemLevel = 1;
+            return _itemLevel;
         }
 
         static string KindName(CatalogKind kind)
