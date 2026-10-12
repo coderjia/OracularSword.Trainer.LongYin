@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.1", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.2", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -490,7 +490,7 @@ namespace OracularSword.Trainer.LongYin
                 case 1: return "带「我方」的选项只作用于我方。F8 开关窗口。";
                 case 2: return "探索选项只在任务或奇遇地图内生效。F8 开关窗口。";
                 case 3: return "城镇状态只作用于我方城、镇、乡、村。F8 开关窗口。";
-                case 4: return "可多选。数量和品级用于这次添加。等级只对珍宝和材料生效。F8 开关窗口。";
+                case 4: return "可多选。数量和品级用于这次添加。等级用于武器、护甲、头盔、鞋子、珍宝和材料；列表里的等级是物品表原等级。F8 开关窗口。";
                 default: return "这一页留待以后的功能。F8 开关窗口。";
             }
         }
@@ -712,7 +712,7 @@ namespace OracularSword.Trainer.LongYin
                 {
                     Key = kind + ":" + pair.Key,
                     Name = item.name,
-                    Title = item.name + "  " + KindName(kind) + "  等级 " + item.itemLv,
+                    Title = item.name + "  " + KindName(kind) + "  " + (UsesChosenLevel(kind) ? "物品表等级 " : "等级 ") + item.itemLv,
                     Stats = ItemStats(item),
                     Describe = item.describe ?? "",
                     Kind = kind,
@@ -811,7 +811,7 @@ namespace OracularSword.Trainer.LongYin
                 GUI.color = prev;
             }
             GUI.Label(new Rect(field.xMax + row * 0.2f, y, width - (field.xMax - x) - row * 0.2f, row),
-                enabled ? "用于本次选中的珍宝和材料" : "选中珍宝或材料后可填写", _labelStyle);
+                enabled ? "用于武器、护甲、头盔、鞋子、珍宝和材料" : "选中这些物品后可填写", _labelStyle);
             y += row;
         }
 
@@ -822,10 +822,26 @@ namespace OracularSword.Trainer.LongYin
                 var entry = _catalog[i];
                 if (!_picked.Contains(entry.Key))
                     continue;
-                if (entry.Kind == CatalogKind.Treasure || entry.Kind == CatalogKind.Material)
+                if (UsesChosenLevel(entry.Kind))
                     return true;
             }
             return false;
+        }
+
+        static bool UsesChosenLevel(CatalogKind kind)
+        {
+            switch (kind)
+            {
+                case CatalogKind.Weapon:
+                case CatalogKind.Armor:
+                case CatalogKind.Helmet:
+                case CatalogKind.Shoes:
+                case CatalogKind.Treasure:
+                case CatalogKind.Material:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         static int ReadLevel(bool apply)
@@ -977,6 +993,8 @@ namespace OracularSword.Trainer.LongYin
         {
             if (entry.Kind == CatalogKind.Treasure || entry.Kind == CatalogKind.Material)
                 return MakeGeneratedItem(entry, grade, level);
+            if (UsesChosenLevel(entry.Kind))
+                return MakeEquipment(entry, grade, level, player);
             var game = GamePlay();
             try
             {
@@ -989,10 +1007,7 @@ namespace OracularSword.Trainer.LongYin
                 if (game != null && entry.Source != null)
                 {
                     ItemData rolled = null;
-                    int itemLv = entry.Source.itemLv;
-                    if (entry.Kind == CatalogKind.Weapon)
-                        rolled = game.GenerateWeapon(itemLv, entry.Id, 0f, player);
-                    else if (entry.Kind == CatalogKind.Med)
+                    if (entry.Kind == CatalogKind.Med)
                         rolled = game.GenerateMedData(entry.Id, 0f);
                     else if (entry.Kind == CatalogKind.Food)
                         rolled = game.GenerateFoodData(entry.Id, 0f);
@@ -1009,6 +1024,48 @@ namespace OracularSword.Trainer.LongYin
             if (copy != null)
                 copy.rareLv = grade;
             return copy;
+        }
+
+        static ItemData MakeEquipment(ItemEntry entry, int grade, int level, HeroData player)
+        {
+            ItemData rolled = null;
+            var game = GamePlay();
+            try
+            {
+                if (game != null && entry.Source != null)
+                {
+                    int little = entry.Source.equipmentData != null ? entry.Source.equipmentData.littleType : 0;
+                    if (entry.Kind == CatalogKind.Weapon)
+                        rolled = game.GenerateWeapon(level, entry.Id, 0f, player);
+                    else if (entry.Kind == CatalogKind.Armor)
+                        rolled = game.GenerateArmor(level, little, 0f, player);
+                    else if (entry.Kind == CatalogKind.Helmet)
+                        rolled = game.GenerateHelmet(level, little, 0f, player);
+                    else if (entry.Kind == CatalogKind.Shoes)
+                        rolled = game.GenerateShoes(level, little, 0f, player);
+                }
+            }
+            catch
+            {
+                rolled = null;
+            }
+            if (rolled == null)
+                rolled = CloneItem(entry.Source);
+            if (rolled == null)
+                return null;
+            if (entry.Kind != CatalogKind.Weapon && entry.Source != null)
+            {
+                if (!string.IsNullOrEmpty(entry.Source.name))
+                    rolled.name = entry.Source.name;
+                if (!string.IsNullOrEmpty(entry.Source.checkName))
+                    rolled.checkName = entry.Source.checkName;
+                if (!string.IsNullOrEmpty(entry.Source.describe))
+                    rolled.describe = entry.Source.describe;
+                rolled.itemID = entry.Source.itemID;
+            }
+            rolled.itemLv = level;
+            rolled.rareLv = grade;
+            return rolled;
         }
 
         static ItemData MakeGeneratedItem(ItemEntry entry, int grade, int level)
