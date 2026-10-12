@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.5", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.6", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -1395,6 +1395,7 @@ namespace OracularSword.Trainer.LongYin
             {
                 _catalogAdding = false;
             }
+            _picked.Clear();
             if (added > 0)
                 Log("已把 " + added + " 件物品放入背包");
         }

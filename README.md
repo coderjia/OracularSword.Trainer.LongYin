@@ -2,7 +2,7 @@
 
 《龙隐立志传》的 MelonLoader 修改器。编译产物为 `OracularSword.Trainer.LongYin.dll`，命名空间为 `OracularSword.Trainer.LongYin`。游戏内显示名称为「修改器」。
 
-当前版本：**1.9.5**
+当前版本：**1.9.6**
 
 ## 使用
 
