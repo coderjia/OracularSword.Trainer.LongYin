@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.4", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.5", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -313,6 +313,8 @@ namespace OracularSword.Trainer.LongYin
                 menu = GradeNames().Length * row * 0.9f;
             else if (_tab == 4 && _catalogRareOpen)
                 menu = GradeNames().Length * row * 0.9f;
+            else if (_tab == 4 && _filterMenu != 0)
+                menu = FilterMenuHeight(row);
             float height = Mathf.Min(font * 2.8f + row * 2.3f + TabBodyRows() * row + menu + font * 8.2f, Screen.height - 40f);
             var window = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
             var prevColor = GUI.color;
@@ -397,7 +399,7 @@ namespace OracularSword.Trainer.LongYin
                 case 1: return 8f;
                 case 2: return 3f;
                 case 3: return 4f;
-                case 4: return 12f;
+                case 4: return 13f;
                 default: return 1f;
             }
         }
@@ -455,6 +457,7 @@ namespace OracularSword.Trainer.LongYin
                 _panelOpen = false;
                 _rareMenuOpen = false;
                 _catalogRareOpen = false;
+                _filterMenu = 0;
             }
         }
 
@@ -476,6 +479,7 @@ namespace OracularSword.Trainer.LongYin
                     _tab = i;
                     _rareMenuOpen = false;
                     _catalogRareOpen = false;
+                    _filterMenu = 0;
                 }
             }
             GUI.backgroundColor = prev;
@@ -490,7 +494,7 @@ namespace OracularSword.Trainer.LongYin
                 case 1: return "带「我方」的选项只作用于我方。F8 开关窗口。";
                 case 2: return "探索选项只在任务或奇遇地图内生效。F8 开关窗口。";
                 case 3: return "城镇状态只作用于我方城、镇、乡、村。F8 开关窗口。";
-                case 4: return "可多选。数量和品级用于这次添加。等级为劣质到绝世六档，用于武器、护甲、头盔、鞋子、珍宝和材料。F8 开关窗口。";
+                case 4: return "可按类型、分类、等级、品级和名称一起筛选。分类会随类型变化。F8 开关窗口。";
                 default: return "这一页留待以后的功能。F8 开关窗口。";
             }
         }
@@ -518,8 +522,44 @@ namespace OracularSword.Trainer.LongYin
             public string Describe;
             public CatalogKind Kind;
             public int Id;
+            public int Sub;
+            public int Level;
+            public int Rare;
             public ItemData Source;
         }
+
+        enum FilterGroup
+        {
+            All,
+            Equip,
+            Med,
+            Food,
+            Book,
+            Treasure,
+            Material,
+            Horse
+        }
+
+        sealed class SubOption
+        {
+            public string Label;
+            public int Value;
+        }
+
+        static readonly string[] FilterGroupNames = { "全部", "装备", "丹药", "饮食", "秘籍", "珍宝", "材料", "马匹" };
+        static readonly string[] FilterLevelNames = { "全部", "劣质", "普通", "优质", "精良", "完美", "绝世" };
+        static readonly string[] FilterGradeNames = { "全部", "残品", "下品", "中品", "上品", "珍品", "极品" };
+        static readonly List<SubOption> _subOptions = new List<SubOption>();
+        static readonly Dictionary<int, string> _forceNames = new Dictionary<int, string>();
+        static string[] _foodTypeNames = { "佳肴", "美酒" };
+        static string[] _horseTypeNames;
+        static string[] _bookGradeNames;
+        static int _filterGroup;
+        static int _filterSub;
+        static int _filterLevel;
+        static int _filterGrade;
+        static int _filterMenu;
+        static Vector2 _filterMenuScroll;
 
         static readonly List<ItemEntry> _catalog = new List<ItemEntry>();
         static readonly HashSet<string> _picked = new HashSet<string>();
@@ -537,11 +577,15 @@ namespace OracularSword.Trainer.LongYin
         static void DrawItemCatalog(ref float y, float x, float width, float row, float font)
         {
             EnsureCatalog();
+            DrawCatalogFilters(ref y, x, width, row);
             float searchW = width * 0.72f;
             DrawField(new Rect(x, y, searchW, row * 0.86f));
             _itemSearch = GUI.TextField(new Rect(x, y, searchW, row * 0.86f), _itemSearch ?? "", _fieldStyle);
             if (GUI.Button(new Rect(x + searchW + row * 0.12f, y, width - searchW - row * 0.12f, row * 0.86f), "刷新", _buttonStyle))
+            {
+                _filterMenu = 0;
                 RebuildCatalog();
+            }
             y += row;
 
             float viewH = row * 8f;
@@ -550,7 +594,7 @@ namespace OracularSword.Trainer.LongYin
             int shown = 0;
             for (int i = 0; i < _catalog.Count; i++)
             {
-                if (MatchSearch(_catalog[i]))
+                if (PassFilter(_catalog[i]))
                     shown++;
             }
             float contentH = Mathf.Max(viewH, shown * card);
@@ -561,7 +605,7 @@ namespace OracularSword.Trainer.LongYin
             for (int i = 0; i < _catalog.Count; i++)
             {
                 var entry = _catalog[i];
-                if (!MatchSearch(entry))
+                if (!PassFilter(entry))
                     continue;
                 var rect = new Rect(0f, cy, width - 18f, card - 4f);
                 GUI.BeginGroup(rect);
@@ -602,7 +646,11 @@ namespace OracularSword.Trainer.LongYin
             int grade = CatalogGradeIndex(names.Length);
             var gradeRect = new Rect(countRect.xMax + row * 0.16f, countRect.y, gradeW, countRect.height);
             if (GUI.Button(gradeRect, names[grade] + (_catalogRareOpen ? " ▴" : " ▾"), _buttonStyle))
+            {
                 _catalogRareOpen = !_catalogRareOpen;
+                if (_catalogRareOpen)
+                    _filterMenu = 0;
+            }
             float addX = gradeRect.xMax + row * 0.16f;
             string addLabel = _picked.Count > 0 ? "添加（" + _picked.Count + "）" : "添加";
             if (GUI.Button(new Rect(addX, countRect.y, x + width - addX, countRect.height), addLabel, _buttonStyle))
@@ -637,6 +685,307 @@ namespace OracularSword.Trainer.LongYin
             if (string.IsNullOrEmpty(word))
                 return true;
             return entry.Name != null && entry.Name.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        static bool PassFilter(ItemEntry entry)
+        {
+            if (!MatchSearch(entry))
+                return false;
+            if (!MatchGroup(entry))
+                return false;
+            if (!MatchSub(entry))
+                return false;
+            if (_filterLevel > 0 && entry.Level != _filterLevel - 1)
+                return false;
+            if (_filterGrade > 0 && entry.Rare != _filterGrade - 1)
+                return false;
+            return true;
+        }
+
+        static bool MatchGroup(ItemEntry entry)
+        {
+            switch ((FilterGroup)_filterGroup)
+            {
+                case FilterGroup.All: return true;
+                case FilterGroup.Equip: return IsEquipment(entry.Kind);
+                case FilterGroup.Med: return entry.Kind == CatalogKind.Med;
+                case FilterGroup.Food: return entry.Kind == CatalogKind.Food;
+                case FilterGroup.Book: return entry.Kind == CatalogKind.Book;
+                case FilterGroup.Treasure: return entry.Kind == CatalogKind.Treasure;
+                case FilterGroup.Material: return entry.Kind == CatalogKind.Material;
+                case FilterGroup.Horse: return entry.Kind == CatalogKind.Horse;
+                default: return true;
+            }
+        }
+
+        static bool IsEquipment(CatalogKind kind)
+        {
+            return kind == CatalogKind.Weapon || kind == CatalogKind.Armor || kind == CatalogKind.Helmet || kind == CatalogKind.Shoes;
+        }
+
+        static bool MatchSub(ItemEntry entry)
+        {
+            if (_filterSub <= 0 || _filterSub >= _subOptions.Count)
+                return true;
+            int value = _subOptions[_filterSub].Value;
+            if ((FilterGroup)_filterGroup == FilterGroup.Equip)
+                return (int)entry.Kind == value;
+            return entry.Sub == value;
+        }
+
+        static bool HasSubFilter()
+        {
+            return _subOptions.Count > 1;
+        }
+
+        static void DrawCatalogFilters(ref float y, float x, float width, float row)
+        {
+            float gap = row * 0.1f;
+            float buttonW = (width - gap * 3f) / 4f;
+            float buttonH = row * 0.86f;
+            var typeRect = new Rect(x, y, buttonW, buttonH);
+            var subRect = new Rect(typeRect.xMax + gap, y, buttonW, buttonH);
+            var levelRect = new Rect(subRect.xMax + gap, y, buttonW, buttonH);
+            var gradeRect = new Rect(levelRect.xMax + gap, y, buttonW, buttonH);
+            if (GUI.Button(typeRect, MenuCaption("类型", FilterGroupNames[ClampIndex(_filterGroup, FilterGroupNames.Length)], 1), _buttonStyle))
+                ToggleFilterMenu(1);
+            bool subOn = HasSubFilter();
+            var prevEnabled = GUI.enabled;
+            if (!subOn)
+                GUI.enabled = false;
+            string subLabel = subOn ? _subOptions[ClampIndex(_filterSub, _subOptions.Count)].Label : "无";
+            if (GUI.Button(subRect, MenuCaption("分类", subLabel, subOn ? 2 : 0), _buttonStyle) && subOn)
+                ToggleFilterMenu(2);
+            GUI.enabled = prevEnabled;
+            if (GUI.Button(levelRect, MenuCaption("等级", FilterLevelNames[ClampIndex(_filterLevel, FilterLevelNames.Length)], 3), _buttonStyle))
+                ToggleFilterMenu(3);
+            if (GUI.Button(gradeRect, MenuCaption("品级", FilterGradeNames[ClampIndex(_filterGrade, FilterGradeNames.Length)], 4), _buttonStyle))
+                ToggleFilterMenu(4);
+            y += row;
+            if (_filterMenu == 0)
+                return;
+            Rect anchor = typeRect;
+            if (_filterMenu == 2)
+                anchor = subRect;
+            else if (_filterMenu == 3)
+                anchor = levelRect;
+            else if (_filterMenu == 4)
+                anchor = gradeRect;
+            DrawFilterMenu(ref y, x, width, row, anchor);
+        }
+
+        static string MenuCaption(string title, string value, int menu)
+        {
+            string arrow = menu != 0 && _filterMenu == menu ? " ▴" : (menu != 0 ? " ▾" : "");
+            return title + " " + value + arrow;
+        }
+
+        static void ToggleFilterMenu(int menu)
+        {
+            _catalogRareOpen = false;
+            _filterMenu = _filterMenu == menu ? 0 : menu;
+            _filterMenuScroll = Vector2.zero;
+        }
+
+        static int OpenFilterOptionCount()
+        {
+            switch (_filterMenu)
+            {
+                case 1: return FilterGroupNames.Length;
+                case 2: return _subOptions.Count;
+                case 3: return FilterLevelNames.Length;
+                case 4: return FilterGradeNames.Length;
+                default: return 0;
+            }
+        }
+
+        static string OpenFilterOption(int index)
+        {
+            switch (_filterMenu)
+            {
+                case 1: return FilterGroupNames[index];
+                case 2: return _subOptions[index].Label;
+                case 3: return FilterLevelNames[index];
+                case 4: return FilterGradeNames[index];
+                default: return "";
+            }
+        }
+
+        static int OpenFilterSelected()
+        {
+            switch (_filterMenu)
+            {
+                case 1: return _filterGroup;
+                case 2: return _filterSub;
+                case 3: return _filterLevel;
+                case 4: return _filterGrade;
+                default: return 0;
+            }
+        }
+
+        static float FilterMenuHeight(float row)
+        {
+            int count = OpenFilterOptionCount();
+            if (count <= 0)
+                return 0f;
+            return Mathf.Min(count, 6) * row * 0.9f;
+        }
+
+        static void DrawFilterMenu(ref float y, float x, float width, float row, Rect anchor)
+        {
+            int count = OpenFilterOptionCount();
+            if (count <= 0)
+                return;
+            float itemH = row * 0.9f;
+            float viewH = FilterMenuHeight(row);
+            float menuW = Mathf.Max(anchor.width, row * 4.4f);
+            if (anchor.x + menuW > x + width)
+                menuW = x + width - anchor.x;
+            var view = new Rect(anchor.x, y, menuW, viewH);
+            _filterMenuScroll = GUI.BeginScrollView(view, _filterMenuScroll, new Rect(0f, 0f, menuW - 16f, count * itemH));
+            int selected = OpenFilterSelected();
+            for (int i = 0; i < count; i++)
+            {
+                string label = i == selected ? "● " + OpenFilterOption(i) : OpenFilterOption(i);
+                if (GUI.Button(new Rect(0f, i * itemH, menuW - 16f, itemH * 0.92f), label, _buttonStyle))
+                    PickFilter(i);
+            }
+            GUI.EndScrollView();
+            y += viewH;
+        }
+
+        static void PickFilter(int index)
+        {
+            if (_filterMenu == 1 && _filterGroup != index)
+            {
+                _filterGroup = index;
+                _filterSub = 0;
+                RebuildSubOptions();
+            }
+            else if (_filterMenu == 2)
+                _filterSub = index;
+            else if (_filterMenu == 3)
+                _filterLevel = index;
+            else if (_filterMenu == 4)
+                _filterGrade = index;
+            _filterMenu = 0;
+            _itemScroll = Vector2.zero;
+        }
+
+        static int ClampIndex(int index, int count)
+        {
+            if (count <= 0)
+                return 0;
+            if (index < 0 || index >= count)
+                return 0;
+            return index;
+        }
+
+        static void RebuildSubOptions()
+        {
+            int keep = _filterSub;
+            _subOptions.Clear();
+            _subOptions.Add(new SubOption { Label = "全部", Value = -1 });
+            var seen = new HashSet<int>();
+            var group = (FilterGroup)_filterGroup;
+            for (int i = 0; i < _catalog.Count; i++)
+            {
+                var entry = _catalog[i];
+                int value = -1;
+                string label = null;
+                if (group == FilterGroup.Equip && IsEquipment(entry.Kind))
+                {
+                    value = (int)entry.Kind;
+                    label = KindName(entry.Kind);
+                }
+                else if (group == FilterGroup.Food && entry.Kind == CatalogKind.Food)
+                {
+                    value = entry.Sub;
+                    label = IndexedName(_foodTypeNames, entry.Sub);
+                }
+                else if (group == FilterGroup.Horse && entry.Kind == CatalogKind.Horse)
+                {
+                    value = entry.Sub;
+                    label = IndexedName(_horseTypeNames, entry.Sub);
+                }
+                else if (group == FilterGroup.Book && entry.Kind == CatalogKind.Book)
+                {
+                    value = entry.Sub;
+                    label = ForceLabel(entry.Sub);
+                }
+                if (label == null || !seen.Add(value))
+                    continue;
+                _subOptions.Add(new SubOption { Label = label, Value = value });
+            }
+            if (group == FilterGroup.Equip || group == FilterGroup.Book || group == FilterGroup.Food || group == FilterGroup.Horse)
+            {
+                if (_subOptions.Count > 1)
+                    _subOptions.Sort(1, _subOptions.Count - 1, Comparer<SubOption>.Create((a, b) => a.Value.CompareTo(b.Value)));
+            }
+            if (keep < 0 || keep >= _subOptions.Count)
+                _filterSub = 0;
+        }
+
+        static void LoadForceNames(GameDataController data)
+        {
+            _forceNames.Clear();
+            if (data == null)
+                return;
+            try
+            {
+                var forces = data.forceDataBase;
+                if (forces == null)
+                    return;
+                foreach (var pair in forces)
+                {
+                    var force = pair.Value;
+                    if (force == null || string.IsNullOrEmpty(force.forceName))
+                        continue;
+                    _forceNames[pair.Key] = force.forceName;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        static string[] CopyIndexedNames(Il2CppSystem.Collections.Generic.List<string> source)
+        {
+            if (source == null || source.Count <= 0)
+                return null;
+            var names = new string[source.Count];
+            for (int i = 0; i < source.Count; i++)
+            {
+                var name = source[i];
+                names[i] = string.IsNullOrEmpty(name) ? ("分类" + i) : name;
+            }
+            return names;
+        }
+
+        static string IndexedName(string[] names, int index)
+        {
+            if (names != null && index >= 0 && index < names.Length && !string.IsNullOrEmpty(names[index]))
+                return names[index];
+            return index >= 0 ? ("分类" + index) : "";
+        }
+
+        static string ForceLabel(int id)
+        {
+            string name;
+            if (_forceNames.TryGetValue(id, out name) && !string.IsNullOrEmpty(name))
+                return name;
+            if (id <= 0)
+                return "无门派";
+            return "门派" + id;
+        }
+
+        static string BookGradeName(int rare)
+        {
+            if (_bookGradeNames != null && rare >= 0 && rare < _bookGradeNames.Length)
+                return _bookGradeNames[rare];
+            if (rare >= 0 && rare + 1 < FilterGradeNames.Length)
+                return FilterGradeNames[rare + 1];
+            return "品级" + rare;
         }
 
         static int CatalogGradeIndex(int count)
@@ -676,7 +1025,21 @@ namespace OracularSword.Trainer.LongYin
             if (data == null)
             {
                 _catalogReady = false;
+                RebuildSubOptions();
                 return;
+            }
+            LoadForceNames(data);
+            try
+            {
+                _foodTypeNames = CopyIndexedNames(GlobalData.FoodTypeName) ?? new[] { "佳肴", "美酒" };
+                _horseTypeNames = CopyIndexedNames(GlobalData.HorseTypeName) ?? new[] { "马匹", "鞍具" };
+                _bookGradeNames = CopyIndexedNames(GlobalData.BookRareLvName);
+            }
+            catch
+            {
+                _foodTypeNames = new[] { "佳肴", "美酒" };
+                _horseTypeNames = new[] { "马匹", "鞍具" };
+                _bookGradeNames = null;
             }
             CollectItems(data.weaponDataBase, CatalogKind.Weapon);
             CollectItems(data.armorDataBase, CatalogKind.Armor);
@@ -697,6 +1060,7 @@ namespace OracularSword.Trainer.LongYin
                     return level;
                 return string.Compare(a.Name, b.Name, StringComparison.Ordinal);
             });
+            RebuildSubOptions();
         }
 
         static int ItemLevel(ItemEntry entry)
@@ -715,15 +1079,25 @@ namespace OracularSword.Trainer.LongYin
                 var item = pair.Value;
                 if (item == null || string.IsNullOrEmpty(item.name))
                     continue;
+                string subtype = "";
+                if (kind == CatalogKind.Food)
+                    subtype = IndexedName(_foodTypeNames, item.subType);
+                else if (kind == CatalogKind.Horse)
+                    subtype = IndexedName(_horseTypeNames, item.subType);
+                if (!string.IsNullOrEmpty(subtype))
+                    subtype = "  " + subtype;
                 _catalog.Add(new ItemEntry
                 {
                     Key = kind + ":" + pair.Key,
                     Name = item.name,
-                    Title = item.name + "  " + KindName(kind) + "  " + (UsesChosenLevel(kind) ? "物品表等级 " : "等级 ") + LevelName(item.itemLv),
+                    Title = item.name + "  " + KindName(kind) + subtype + "  " + (UsesChosenLevel(kind) ? "物品表等级 " : "等级 ") + LevelName(item.itemLv),
                     Stats = ItemStats(item),
                     Describe = item.describe ?? "",
                     Kind = kind,
                     Id = pair.Key,
+                    Sub = IsEquipment(kind) ? (int)kind : item.subType,
+                    Level = item.itemLv,
+                    Rare = item.rareLv,
                     Source = item
                 });
             }
@@ -751,11 +1125,14 @@ namespace OracularSword.Trainer.LongYin
                 {
                     Key = "book:" + pair.Key,
                     Name = skill.name,
-                    Title = skill.name + "  秘籍  等级 " + skill.rareLv,
+                    Title = skill.name + "  秘籍  " + ForceLabel(skill.belongForceID) + "  " + BookGradeName(skill.rareLv),
                     Stats = stats ?? "",
                     Describe = skill.describe ?? "",
                     Kind = CatalogKind.Book,
                     Id = pair.Key,
+                    Sub = skill.belongForceID,
+                    Level = -1,
+                    Rare = skill.rareLv,
                     Source = null
                 });
             }
@@ -791,6 +1168,9 @@ namespace OracularSword.Trainer.LongYin
                     Describe = "",
                     Kind = kind,
                     Id = i,
+                    Sub = i,
+                    Level = -1,
+                    Rare = -1,
                     Source = null
                 });
             }
