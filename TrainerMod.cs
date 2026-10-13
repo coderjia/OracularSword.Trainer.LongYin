@@ -7,7 +7,7 @@ using Il2Cpp;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.6", "local")]
+[assembly: MelonInfo(typeof(OracularSword.Trainer.LongYin.TrainerMod), "修改器", "1.9.7", "local")]
 
 namespace OracularSword.Trainer.LongYin
 {
@@ -39,6 +39,8 @@ namespace OracularSword.Trainer.LongYin
         static MelonPreferences_Entry<bool> _itemRareLockEnabled;
         static MelonPreferences_Entry<int> _itemRareIndex;
         static MelonPreferences_Entry<bool> _auctionWinEnabled;
+        static readonly MelonPreferences_Entry<bool>[] _resourceLockEntries = new MelonPreferences_Entry<bool>[6];
+        static readonly MelonPreferences_Entry<int>[] _resourceValueEntries = new MelonPreferences_Entry<int>[6];
         static int _expGainDepth;
         static bool _fillingExp;
         static bool _loggedExpFailure;
@@ -107,6 +109,20 @@ namespace OracularSword.Trainer.LongYin
         public static bool ItemRareLockEnabled { get; private set; }
         public static int ItemRareIndex { get; private set; }
         public static bool AuctionWinEnabled { get; private set; }
+        static readonly bool[] _resourceLock = new bool[6];
+        static readonly string[] _resourceText = { "99999", "99999", "99999", "99999", "99999", "99999" };
+        static readonly int[] _resourceIndex = { 0, 1, 2, 3, 4, 5 };
+        static readonly string[] ResourceLabels = { "声望", "银钱", "粮食", "木料", "矿石", "药材" };
+        static readonly string[][] ResourceAliases =
+        {
+            new[] { "声望", "威望" },
+            new[] { "银钱", "银两" },
+            new[] { "粮食" },
+            new[] { "木料", "木材" },
+            new[] { "矿石" },
+            new[] { "药材" }
+        };
+        static bool _resourceIndexReady;
 
         public override void OnInitializeMelon()
         {
@@ -136,6 +152,16 @@ namespace OracularSword.Trainer.LongYin
             _itemRareLockEnabled = category.CreateEntry("ItemRareLockEnabled", false);
             _itemRareIndex = category.CreateEntry("ItemRareIndex", 5);
             _auctionWinEnabled = category.CreateEntry("AuctionWinEnabled", false);
+            for (int i = 0; i < ResourceLabels.Length; i++)
+            {
+                _resourceLockEntries[i] = category.CreateEntry("ForceResourceLock" + i, false);
+                _resourceValueEntries[i] = category.CreateEntry("ForceResourceValue" + i, 99999);
+                _resourceLock[i] = _resourceLockEntries[i].Value;
+                int saved = _resourceValueEntries[i].Value;
+                if (saved < 0)
+                    saved = 0;
+                _resourceText[i] = saved.ToString();
+            }
             BuildEnabled = _buildEnabled.Value;
             ResearchEnabled = _researchEnabled.Value;
             InfiniteHp = _infiniteHp.Value;
@@ -236,6 +262,7 @@ namespace OracularSword.Trainer.LongYin
             Patch(harmony, AccessTools.Method(typeof(AuctionController), nameof(AuctionController.StartAuctionDeal)), nameof(ClaimAuctionWinner), null);
             Patch(harmony, AccessTools.Method(typeof(AuctionController), nameof(AuctionController.AutoFinishAuction)), nameof(ClaimAuctionWinner), nameof(GiveLeftoverLots));
             PatchAuctionDeal(harmony);
+            PatchForceResources(harmony);
 
             LoggerInstance.Msg("已加载。左上角「修改器」或 F8 打开窗口。");
         }
@@ -249,6 +276,8 @@ namespace OracularSword.Trainer.LongYin
 
             if (DateLockEnabled)
                 RestoreDate();
+            if (AnyResourceLock())
+                ApplyForceResources();
 
             if (NeedsBattleTick())
                 ApplyBattle();
@@ -398,7 +427,7 @@ namespace OracularSword.Trainer.LongYin
                 case 0: return 7f;
                 case 1: return 8f;
                 case 2: return 3f;
-                case 3: return 4f;
+                case 3: return 10f;
                 case 4: return 13f;
                 default: return 1f;
             }
@@ -441,6 +470,8 @@ namespace OracularSword.Trainer.LongYin
                     Option(ref y, x, width, row, ResearchEnabled, "科研加速（1天完成）", SetResearchEnabled);
                     Option(ref y, x, width, row, TownStateEnabled, "城镇状态充满（我方）", SetTownStateEnabled);
                     Option(ref y, x, width, row, BookWeightEnabled, "门派秘籍负重清零", SetBookWeightEnabled);
+                    for (int i = 0; i < ResourceLabels.Length; i++)
+                        DrawResourceOption(ref y, x, width, row, i);
                     break;
                 case 4:
                     DrawItemCatalog(ref y, x, width, row, font);
@@ -493,7 +524,7 @@ namespace OracularSword.Trainer.LongYin
                 case 0: return "锁定日期只锁定年月日，不锁时辰。锁定品级只影响之后获得的物品。F8 开关窗口。";
                 case 1: return "带「我方」的选项只作用于我方。F8 开关窗口。";
                 case 2: return "探索选项只在任务或奇遇地图内生效。F8 开关窗口。";
-                case 3: return "城镇状态只作用于我方城、镇、乡、村。F8 开关窗口。";
+                case 3: return "城镇状态只作用于我方城、镇、乡、村。门派资源锁定只作用于主角门派，锁定值取右侧输入框。F8 开关窗口。";
                 case 4: return "可按类型、分类、等级、品级和名称一起筛选。分类会随类型变化。F8 开关窗口。";
                 default: return "这一页留待以后的功能。F8 开关窗口。";
             }
@@ -1569,6 +1600,65 @@ namespace OracularSword.Trainer.LongYin
             }
         }
 
+        static void DrawResourceOption(ref float y, float x, float width, float row, int index)
+        {
+            float fieldW = Mathf.Max(row * 3.8f, width * 0.22f);
+            float gap = row * 0.2f;
+            bool next = DrawOption(new Rect(x, y, width - fieldW - gap, row), _resourceLock[index], "锁定" + ResourceLabels[index]);
+            if (next != _resourceLock[index])
+                SetResourceLock(index, next);
+            var field = new Rect(x + width - fieldW, y + row * 0.1f, fieldW, row * 0.8f);
+            DrawField(field);
+            string edited = GUI.TextField(field, _resourceText[index] ?? "99999", _fieldStyle);
+            if (edited != _resourceText[index])
+                SetResourceText(index, edited);
+            y += row;
+        }
+
+        static void SetResourceLock(int index, bool value)
+        {
+            _resourceLock[index] = value;
+            SaveEntry(_resourceLockEntries[index], value);
+            Log(value ? "锁定" + ResourceLabels[index] + "已打开：" + ResourceTarget(index) : "锁定" + ResourceLabels[index] + "已关闭，当前数值保留");
+            if (value)
+                ApplyForceResources();
+        }
+
+        static void SetResourceText(int index, string text)
+        {
+            _resourceText[index] = text ?? "";
+            int value;
+            if (!int.TryParse(_resourceText[index], out value) || value < 0 || value > 99999999)
+                return;
+            var entry = _resourceValueEntries[index];
+            if (entry == null || entry.Value == value)
+                return;
+            entry.Value = value;
+            MelonPreferences.Save();
+        }
+
+        static float ResourceTarget(int index)
+        {
+            int value;
+            if (!int.TryParse(_resourceText[index], out value))
+                return 99999f;
+            if (value < 0)
+                return 0f;
+            if (value > 99999999)
+                return 99999999f;
+            return value;
+        }
+
+        static bool AnyResourceLock()
+        {
+            for (int i = 0; i < _resourceLock.Length; i++)
+            {
+                if (_resourceLock[i])
+                    return true;
+            }
+            return false;
+        }
+
         static void DrawRareOption(ref float y, float x, float width, float row)
         {
             var names = GradeNames();
@@ -1907,6 +1997,11 @@ namespace OracularSword.Trainer.LongYin
             Pull(_explorePowerLockEnabled, () => ExplorePowerLockEnabled, value => ExplorePowerLockEnabled = value);
             Pull(_itemRareLockEnabled, () => ItemRareLockEnabled, value => ItemRareLockEnabled = value);
             Pull(_auctionWinEnabled, () => AuctionWinEnabled, value => AuctionWinEnabled = value);
+            for (int i = 0; i < _resourceLock.Length; i++)
+            {
+                int index = i;
+                Pull(_resourceLockEntries[i], () => _resourceLock[index], value => _resourceLock[index] = value);
+            }
             if (_itemRareIndex != null && ItemRareIndex != _itemRareIndex.Value)
                 ItemRareIndex = _itemRareIndex.Value;
         }
@@ -1927,7 +2022,7 @@ namespace OracularSword.Trainer.LongYin
             _appliedSaved = true;
             bool any = BuildEnabled || ResearchEnabled || DateLockEnabled
                 || EquipWeightEnabled || ItemWeightEnabled || BookWeightEnabled
-                || TownStateEnabled;
+                || TownStateEnabled || AnyResourceLock();
             if (!any)
                 return;
             if (BuildEnabled)
@@ -1943,6 +2038,8 @@ namespace OracularSword.Trainer.LongYin
             }
             if (TownStateEnabled)
                 ApplyTownState();
+            if (AnyResourceLock())
+                ApplyForceResources();
             Log("已按上次保存的开关生效。");
         }
 
@@ -3820,6 +3917,120 @@ namespace OracularSword.Trainer.LongYin
             {
                 _readingRealResearchDays = false;
             }
+        }
+
+        static void PatchForceResources(HarmonyLib.Harmony harmony)
+        {
+            var methods = AccessTools.GetDeclaredMethods(typeof(ForceData));
+            if (methods == null)
+                return;
+            for (int i = 0; i < methods.Count; i++)
+            {
+                var method = methods[i];
+                if (method == null)
+                    continue;
+                if (method.Name != "ChangeResource" && method.Name != "CostResource")
+                    continue;
+                Patch(harmony, method, null, nameof(AfterForceResource));
+            }
+        }
+
+        public static void AfterForceResource(ForceData __instance)
+        {
+            if (__instance == null || !AnyResourceLock())
+                return;
+            RefreshPlayerForce();
+            if (!_hasPlayerForce || __instance.forceID != _playerForceId)
+                return;
+            WriteForceResources(__instance);
+        }
+
+        static void ApplyForceResources()
+        {
+            try
+            {
+                RefreshPlayerForce();
+                var force = PlayerForce();
+                if (force == null)
+                    return;
+                WriteForceResources(force);
+            }
+            catch (Exception ex)
+            {
+                if (_instance != null)
+                    _instance.LoggerInstance.Error("锁定门派资源失败。" + ex.Message);
+            }
+        }
+
+        static void WriteForceResources(ForceData force)
+        {
+            if (force == null)
+                return;
+            EnsureResourceIndex();
+            var store = force.resourceStore;
+            if (store == null)
+                return;
+            var max = force.resourceStoreMax;
+            for (int i = 0; i < _resourceLock.Length; i++)
+            {
+                if (!_resourceLock[i])
+                    continue;
+                int id = _resourceIndex[i];
+                if (id < 0 || id >= store.Count)
+                    continue;
+                float target = ResourceTarget(i);
+                if (max != null && id < max.Count && max[id] < target)
+                    max[id] = target;
+                if (store[id] != target)
+                    store[id] = target;
+            }
+        }
+
+        static void EnsureResourceIndex()
+        {
+            if (_resourceIndexReady)
+                return;
+            try
+            {
+                var names = GlobalData.ResourceName;
+                if (names == null || names.Count <= 0)
+                    return;
+                for (int slot = 0; slot < ResourceAliases.Length; slot++)
+                {
+                    int found = FindResourceName(names, ResourceAliases[slot]);
+                    if (found >= 0)
+                        _resourceIndex[slot] = found;
+                }
+                _resourceIndexReady = true;
+                var shown = new string[names.Count];
+                for (int i = 0; i < names.Count; i++)
+                    shown[i] = i + ":" + names[i];
+                Log("门派资源顺序：" + string.Join("、", shown));
+            }
+            catch
+            {
+            }
+        }
+
+        static int FindResourceName(Il2CppSystem.Collections.Generic.List<string> names, string[] aliases)
+        {
+            for (int pass = 0; pass < 2; pass++)
+            {
+                for (int i = 0; i < names.Count; i++)
+                {
+                    var name = names[i];
+                    if (string.IsNullOrEmpty(name))
+                        continue;
+                    for (int a = 0; a < aliases.Length; a++)
+                    {
+                        if (pass == 0 && name == aliases[a])
+                            return i;
+                        if (pass == 1 && name.Contains(aliases[a]))
+                            return i;
+                    }
+                }
+            }
+            return -1;
         }
 
         static ForceData PlayerForce()
